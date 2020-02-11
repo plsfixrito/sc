@@ -180,7 +180,7 @@ public:
 
     bool ActiveRecalls()
     {
-        for (auto i = 0; i < 12; i++)
+        for (auto i = 0; i < 6; i++)
         {
             auto tr = TrackedRecalls[i];
             if (tr != nullptr && !tr->Ended())

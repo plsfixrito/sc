@@ -16,6 +16,7 @@ public:
     int Id = 0;
     bool Shoot = false;
     std::string BaseSkin;
+    std::string BlockReason;
 };
 
 class JungleSteal
@@ -45,7 +46,7 @@ public:
         const auto JSSubMenu = MenuInstance->AddSubMenu("Jungle Steal", "jungle_steal");
         Enabled = JSSubMenu->AddCheckBox("Enabled", "toggle", true);
 
-        const auto TargetsMenu = MenuInstance->AddSubMenu("Targets", "js_targets");
+        const auto TargetsMenu = JSSubMenu->AddSubMenu("Targets", "js_targets");
         StealBaron = TargetsMenu->AddCheckBox("Steal Baron", "StealBaron", true);
         StealDragon = TargetsMenu->AddCheckBox("Steal Dragon", "StealDragon", true);
         StealRed = TargetsMenu->AddCheckBox("Steal Red", "StealRed", true);
@@ -85,12 +86,12 @@ public:
 
     bool IsRed(IGameObject* target)
     {
-        return target->BaseSkinName().find("SRU_Red") != std::string::npos;
+        return target->Name().find("SRU_Red") != std::string::npos;
     }
 
     bool IsBlue(IGameObject* target)
     {
-        return target->BaseSkinName().find("SRU_Blue") != std::string::npos;
+        return target->Name().find("SRU_Blue") != std::string::npos;
     }
 
     bool MobEnabled(IGameObject* target)
@@ -165,22 +166,27 @@ public:
             trackedMob->HealthPred = (!mob->IsVisible() ? trackedMob->LastHealth : mob->Health()) - (trackedMob->DPS * invsTime) - (trackedMob->DPS * (trackedMob->TravelTime / 1000.f));
 
             // TODO IMPROVE THIS WTF
-            if (trackedMob->DamageOnMob > trackedMob->HealthPred && trackedMob->HealthPred - trackedMob->DamageOnMob > -trackedMob->DamageOnMob)
+            if (trackedMob->DamageOnMob >= trackedMob->HealthPred && trackedMob->HealthPred - trackedMob->DamageOnMob > -trackedMob->DamageOnMob)
             {
-                if ((!NoVision->GetBool() && !mob->IsVisible()) ||
-                    (NoAlly->GetBool() && CountAllies(mob) > 0))
+                auto vision = !mob->IsVisible() && !NoVision->GetBool();
+                auto allies = NoAlly->GetBool() && CountAllies(mob) > 0;
+                auto distance = g_LocalPlayer->Position().Distance(mob->Position()) < 1500;
+                if (vision || allies || distance)
                 {
+                    trackedMob->BlockReason = vision ? "vision" : allies ? "allies" : "distance";
                     trackedMob->Shoot = false;
                     TrackedMobs[mob->NetworkId()] = trackedMob;
                     return false;
                 }
 
+                trackedMob->BlockReason = "";
                 trackedMob->Shoot = true;
                 TrackedMobs[mob->NetworkId()] = trackedMob;
                 return true;
             }
         }
 
+        trackedMob->BlockReason = "No Dmg/Time";
         trackedMob->Shoot = false;
         TrackedMobs[mob->NetworkId()] = trackedMob;
         return false;
@@ -212,12 +218,10 @@ public:
                     skipbaron = true;
                 else if (IsDragon(mob))
                     skipdrag = true;
-                else
-                    continue;
 
                 if (UpdateMob(mob) && IsReady() &&
-                    ((IsBaron(mob) && StealBaron->GetBool()) || 
-                    (IsDragon(mob) && StealDragon->GetBool())) && IsEnabled()) {
+                    MobEnabled(mob) && IsEnabled()) 
+                {
 
                     R->FastCast(mob->ServerPosition());
                     break;
@@ -225,15 +229,14 @@ public:
             }
         }
 
-        if (skipbaron && skipdrag)
-            return;
-
         auto jungleMobs = g_ObjectManager->GetJungleMobs();
         for (auto& mob : jungleMobs)
         {
             if (((!skipdrag && IsDragon(mob) && StealDragon->GetBool()) ||
-                (!skipbaron && IsBaron(mob) && StealBaron->GetBool())) &&
-                UpdateMob(mob) && IsReady() && IsEnabled()) {
+                (!skipbaron && IsBaron(mob) && StealBaron->GetBool()) || 
+                MobEnabled(mob)) &&
+                UpdateMob(mob) && IsReady() && IsEnabled()) 
+            {
 
                 R->FastCast(mob->ServerPosition());
                 break;
@@ -252,7 +255,7 @@ public:
         for (auto& tracked : TrackedMobs)
         {
             s += tracked.second->BaseSkin + " HPred: " + std::to_string(tracked.second->HealthPred) + " | " + std::to_string(tracked.second->DamageOnMob) +
-                "\n- Shoot: " + (tracked.second->Shoot ? "true" : "false") + "\n";
+                "\n- Shoot: " + (tracked.second->Shoot ? "true " : "false ") + tracked.second->BlockReason + "\n";
         }
 
         if (s != "")

@@ -152,8 +152,8 @@ bool TurretTargetingHero(IGameObject* turret)
 {
     return turret->IsValidTarget() &&
         turret->CountAlliesInRange(turret->AttackRange() + turret->BoundingRadius()) + (g_LocalPlayer->IsUnderEnemyTurret() ? -1 : 0) > 0 &&
-        TurretLastTarget.count(turret->NetworkId()) > 0 && TurretLastTarget[turret->NetworkId()]->IsAIHero() &&
-        TurretLastTarget[turret->NetworkId()]->NetworkId() != g_LocalPlayer->NetworkId();
+        TurretLastTarget.count(turret->NetworkId()) > 0 && TurretLastTarget[turret->NetworkId()] != nullptr &&
+        TurretLastTarget[turret->NetworkId()]->IsAIHero() && TurretLastTarget[turret->NetworkId()]->NetworkId() != g_LocalPlayer->NetworkId();
 }
 
 float WDamage(IGameObject* target)
@@ -171,12 +171,14 @@ float QDamage(IGameObject* target)
     if (target->HasBuff("ezrealwattach"))
         dmg += WDamage(target);
 
-    return dmg + Spells::Q->Damage(target);
+    auto ad = 5 + (Spells::Q->Level() * 25) + (1.2f * g_LocalPlayer->TotalAttackDamage());
+    auto ap = 0.15f * g_LocalPlayer->TotalAbilityPower();
+    return dmg + g_Common->CalculateDamageOnUnit(g_LocalPlayer, target, DamageType::Physical, ad + ap);
 }
 
 float HealthPrediction(IGameObject* target, std::shared_ptr<ISpell> spell, Vector castPos)
 {
-    auto travelTime = (((castPos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000));
+    auto travelTime = (((castPos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f));
     return g_HealthPrediction->GetHealthPrediction(target, travelTime);
 }
 
@@ -188,7 +190,7 @@ float HealthPrediction(IGameObject* target, std::shared_ptr<ISpell> spell)
 float RHealthPrediction(IGameObject* target)
 {
     RPred = GetRPred(target);
-    auto travelTime = (((RPred.CastPosition.Distance(g_LocalPlayer->Position()) / Spells::R->Speed()) * 1000.f) + (Spells::R->Delay() * 1000));
+    auto travelTime = (((RPred.CastPosition.Distance(g_LocalPlayer->Position()) / Spells::R->Speed()) * 1000.f) + (Spells::R->Delay() * 1000.f));
     return g_HealthPrediction->GetHealthPrediction(target, travelTime);
 }
 
@@ -243,7 +245,9 @@ IPredictionOutput* GetLastHitMinion(std::vector<IGameObject*> minions)
     minions.erase(std::remove_if(minions.begin(), minions.end(),
         [](IGameObject* t) -> bool
         {
-            if (!t->IsValidTarget(Spells::Q->Range()))
+            if (t == nullptr ||
+                !t->IsValidTarget(Spells::Q->Range()) || 
+                (g_Orbwalker->GetLastTarget() != nullptr && g_Orbwalker->GetLastTarget()->NetworkId() == t->NetworkId()))
                 return true;
 
             auto healthpred = HealthPrediction(t, Spells::Q);
@@ -275,7 +279,9 @@ IPredictionOutput* GetLaneClearMinion(std::vector<IGameObject*> minions)
     minions.erase(std::remove_if(minions.begin(), minions.end(),
         [](IGameObject* t) -> bool
         {
-            if (!t->IsValidTarget(Spells::Q->Range()))
+            if (t == nullptr ||
+                !t->IsValidTarget(Spells::Q->Range()) ||
+                (g_Orbwalker->GetLastTarget() != nullptr && g_Orbwalker->GetLastTarget()->NetworkId() == t->NetworkId()))
                 return true;
 
             auto healthpred = HealthPrediction(t, Spells::Q);
@@ -568,18 +574,18 @@ bool HandleCombo()
     auto qPred = GetPred(qTarget, Spells::Q, g_LocalPlayer->Position());
     if (!TryEQ)
     {
-        if (Menu::Combo::W->GetBool() && Spells::W->IsReady() &&
+        if (Menu::Combo::W->GetBool() && Spells::W->IsReady() && Spells::Q->IsReady() &&
             g_LocalPlayer->Mana() > Spells::Q->ManaCost() + Spells::W->ManaCost() &&
-            qPred.Hitchance >= HitChance::High)
+            qPred.Hitchance >= HitChance::Medium)
         {
-            if (Spells::W->Cast(qTarget, HitChance::VeryHigh))
+            if (Spells::W->Cast(qTarget, HitChance::Medium))
                 return true;
         }
     }
 
     if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady())
     {
-        if (qPred.Hitchance >= (TryEQ ? HitChance::Low : qTarget->HasBuff("ezrealwattach") ? HitChance::Low : HitChance::Medium))
+        if (qPred.Hitchance >= ((TryEQ || qTarget->HasBuff("ezrealwattach")) ? HitChance::Low : HitChance::Medium))
         {
             Spells::Q->Cast(qPred.CastPosition);
             TryEQ = false;
@@ -867,14 +873,26 @@ void OnProcessSpellCast(IGameObject* sender, OnProcessSpellEventArgs* args)
     {
         if (args->Target != nullptr && args->Target->IsMe() && (args->IsAutoAttack || args->SpellSlot != SpellSlot::Invalid))
         {
-            auto incdmg = args->IsAutoAttack ? sender->AutoAttackDamage(g_LocalPlayer, true) : g_Common->GetSpellDamage(sender, g_LocalPlayer, args->SpellSlot, false);
-            if (Menu::Misc::UseHeal->GetBool() && IsKillable(g_LocalPlayer) &&
-                (g_LocalPlayer->Health() - incdmg) / g_LocalPlayer->MaxHealth() <= Menu::Misc::HealPercent->GetInt())
+            if (Menu::Misc::UseHeal->GetBool() && IsKillable(g_LocalPlayer))
             {
-                if (Spells::Heal != nullptr && Spells::Heal->IsReady())
+                auto incdmg = args->IsAutoAttack ? sender->AutoAttackDamage(g_LocalPlayer, true) : g_Common->GetSpellDamage(sender, g_LocalPlayer, args->SpellSlot, false);
+                auto healthAfterDmg = ((g_LocalPlayer->RealHealth(true, true) - incdmg) / g_LocalPlayer->MaxHealth()) * 100.f;
+
+                if (healthAfterDmg < Menu::Misc::HealPercent->GetInt())
                 {
-                    Spells::Heal->Cast();
-                    return;
+                    if (sender->IsAIHero() || healthAfterDmg <= 0)
+                    {
+                        if (Spells::Heal != nullptr && Spells::Heal->IsReady())
+                        {
+                            g_Common->ChatPrint("USE HEAL");
+                            std::string inc = " HAD:" + std::to_string(healthAfterDmg);
+                            std::string incp = inc + " INCD: " + std::to_string(incdmg);
+                            std::string s = sender->BaseSkinName() + incp;
+                            g_Common->ChatPrint(s.c_str());
+                            Spells::Heal->Cast();
+                            return;
+                        }
+                    }
                 }
             }
         }
@@ -983,10 +1001,10 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
     DECLARE_GLOBALS(plugin_sdk);
     
     Spells::Q = g_Common->AddSpell(SpellSlot::Q, 1100.f);
-    Spells::Q->SetSkillshot(.25f, 60.f, 2000.f, kCollidesWithYasuoWall | kCollidesWithHeroes | kCollidesWithMinions, eSkillshotType::kSkillshotLine);
+    Spells::Q->SetSkillshot(.25f, 62.5f, 2000.f, kCollidesWithYasuoWall | kCollidesWithHeroes | kCollidesWithMinions, eSkillshotType::kSkillshotLine);
 
-    Spells::W = g_Common->AddSpell(SpellSlot::W, 1100.f);
-    Spells::W->SetSkillshot(.25f, 65.f, 1500.f, kCollidesWithNothing, eSkillshotType::kSkillshotLine);
+    Spells::W = g_Common->AddSpell(SpellSlot::W, 1150.f);
+    Spells::W->SetSkillshot(.25f, 65.f, 2000.f, kCollidesWithNothing, eSkillshotType::kSkillshotLine);
 
     Spells::E = g_Common->AddSpell(SpellSlot::E, 475.f);
     Spells::E->SetSkillshot(.25f, 750.f, 999999.f, kCollidesWithNothing, eSkillshotType::kSkillshotCircle);
@@ -1055,7 +1073,7 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
             break;
         }
 
-    Misc::SkinHack::SelectedSkin = SkinMenu->AddComboBox("Skin", "skin", skins, 0);
+    Misc::SkinHack::SelectedSkin = SkinMenu->AddComboBox("Skin", "skin", skins, 21);
 
     UpdateSkin();
 

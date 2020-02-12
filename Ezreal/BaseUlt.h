@@ -32,7 +32,7 @@ class BaseUlt
 public:
     std::shared_ptr<ISpell> R;
 
-    TrackedRecall* TrackedRecalls[6] = { };
+    std::vector<TrackedRecall*> TrackedRecalls = std::vector<TrackedRecall*>();
 
     IMenuElement* Toggle = nullptr;
     IMenuElement* Enabled = nullptr;
@@ -61,16 +61,8 @@ public:
         DisableKey = BUSubMenu->AddKeybind("Force Disable", "disable", 0x32, false, _KeybindType::KeybindType_Hold);
         Targets = BUSubMenu->AddSubMenu("Targets", "targets");
 
-        auto i = 0;
         for (auto& enemy : g_ObjectManager->GetChampions(false))
-        {
             Targets->AddCheckBox(enemy->BaseSkinName(), enemy->BaseSkinName(), true)->SetBool(true);
-            auto tr = new TrackedRecall();
-            tr->BaseSkin = enemy->BaseSkinName();
-            tr->Id = enemy->NetworkId();
-            TrackedRecalls[i] = tr;
-            i++;
-        }
 
         IncludePing = BUSubMenu->AddCheckBox("Include Ping In Calculations", "IncludePing", true);
 
@@ -177,25 +169,13 @@ public:
 
     const float width = g_Renderer->ScreenWidth() * 0.1f;
     const float height = g_Renderer->ScreenHeight() * 0.015f;
-
-    bool ActiveRecalls()
-    {
-        for (auto i = 0; i < 6; i++)
-        {
-            auto tr = TrackedRecalls[i];
-            if (tr != nullptr && !tr->Ended())
-                return true;
-        }
-
-        return false;
-    }
-
+    
     void OnEndScene()
     {
         if (!IsEnabled() || !DrawRecalls->GetBool())
             return;
 
-        if (!ActiveRecalls())
+        if (TrackedRecalls.size() == 0)
             return;
 
         auto pos = Vector2(g_Renderer->ScreenWidth() * 0.0130208333333333f, g_Renderer->ScreenHeight() * 0.45f);
@@ -252,40 +232,36 @@ public:
             auto spawn = spawns[0];
             if (spawn != nullptr)*/
             {
+                TrackedRecalls.erase(std::remove_if(TrackedRecalls.begin(), TrackedRecalls.end(),
+                    [&sender](TrackedRecall* recall) -> bool
+                    {
+                        return recall->Ended() || recall->Id == sender->NetworkId();
+                    }), TrackedRecalls.end());
 
-                for (auto& tr : TrackedRecalls)
-                {
-                    if (tr == nullptr || tr->Id != sender->NetworkId())
-                        continue;
+                auto tr = new TrackedRecall();
+                tr->BaseSkin = sender->BaseSkinName();
+                tr->Damage = R->Damage(sender);
+                tr->LastHealth = sender->Health();
+                tr->RecallStart = g_Common->TickCount();
+                tr->Duration = args->Duration;
+                tr->RecallEnd = tr->RecallStart + tr->Duration;
+                tr->EndPosition = sender->Team() == GameObjectTeam::Order ? BlueSpawn : RedSpawn;
+                tr->Id = sender->NetworkId();
+                tr->TravelTime = TravelTime(tr->EndPosition, R);
+                tr->IsActive = true;
 
-                    //tr->BaseSkin = sender->BaseSkinName();
-                    tr->Damage = R->Damage(sender);
-                    tr->LastHealth = sender->Health();
-                    tr->RecallStart = g_Common->TickCount();
-                    tr->Duration = args->Duration;
-                    tr->RecallEnd = tr->RecallStart + tr->Duration;
-                    tr->EndPosition = sender->Team() == GameObjectTeam::Order ? BlueSpawn : RedSpawn;
-                    //tr->Id = sender->NetworkId();
-                    tr->TravelTime = TravelTime(tr->EndPosition, R);
-                    tr->IsActive = true;
-                    break;
-                }
-
-                //TrackedRecalls.push_back(tr);
+                TrackedRecalls.push_back(tr);
                 //g_Log->PrintToFile("added TrackedRecall");
             }
         }
         else if (args->Status == OnTeleportEventArgs::TeleportStatus::Finish || 
                 args->Status == OnTeleportEventArgs::TeleportStatus::Abort)
         {
-            for (auto& tr : TrackedRecalls)
-            {
-                if (tr == nullptr || tr->Id != sender->NetworkId())
-                    continue;
-
-                tr->IsActive = false;
-                break;
-            }
+            TrackedRecalls.erase(std::remove_if(TrackedRecalls.begin(), TrackedRecalls.end(),
+                [&sender](TrackedRecall* recall) -> bool
+                {
+                    return recall->Ended() || recall->Id == sender->NetworkId();
+                }), TrackedRecalls.end());
         }
     }
 };

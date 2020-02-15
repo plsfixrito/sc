@@ -16,7 +16,7 @@ public:
     int Id = 0;
     bool Shoot = false;
     std::string BaseSkin;
-    std::string BlockReason;
+    std::string Status;
 };
 
 class JungleSteal
@@ -107,13 +107,17 @@ public:
         return target->CountMyAlliesInRange(range);
     }
 
+    int CountEnemies(IGameObject* target, float range = 1000)
+    {
+        return target->CountMyEnemiesInRange(range);
+    }
+
     bool UpdateMob(IGameObject* mob)
     {
         if (!mob->IsValid() || mob->IsDead())
         {
-            if (mob->IsDead())
-                if (TrackedMobs.count(mob->NetworkId()) > 0)
-                    TrackedMobs.erase(mob->NetworkId());
+            if (mob != nullptr && TrackedMobs.count(mob->NetworkId()) > 0)
+                TrackedMobs.erase(mob->NetworkId());
 
             return false;
         }
@@ -168,25 +172,25 @@ public:
             // TODO IMPROVE THIS WTF
             if (trackedMob->DamageOnMob >= trackedMob->HealthPred && trackedMob->HealthPred - trackedMob->DamageOnMob > -trackedMob->DamageOnMob)
             {
-                auto vision = !mob->IsVisible() && !NoVision->GetBool();
-                auto allies = NoAlly->GetBool() && CountAllies(mob) > 0;
-                auto distance = g_LocalPlayer->Position().Distance(mob->Position()) < 1500;
+                const auto vision = !mob->IsVisible() && !NoVision->GetBool();
+                const auto allies = NoAlly->GetBool() && CountAllies(mob) > 0 && CountEnemies(mob) == 0;
+                const auto distance = g_LocalPlayer->Position().Distance(mob->Position()) < 1500.f;
                 if (vision || allies || distance)
                 {
-                    trackedMob->BlockReason = vision ? "vision" : allies ? "allies" : "distance";
+                    trackedMob->Status = vision ? "No Vision" : allies ? "Allies Near" : "In Range";
                     trackedMob->Shoot = false;
                     TrackedMobs[mob->NetworkId()] = trackedMob;
                     return false;
                 }
 
-                trackedMob->BlockReason = "";
+                trackedMob->Status = "Can Shoot";
                 trackedMob->Shoot = true;
                 TrackedMobs[mob->NetworkId()] = trackedMob;
                 return true;
             }
         }
 
-        trackedMob->BlockReason = "No Dmg/Time";
+        trackedMob->Status = "No Dmg/Time";
         trackedMob->Shoot = false;
         TrackedMobs[mob->NetworkId()] = trackedMob;
         return false;
@@ -196,38 +200,39 @@ public:
     {
         if (!Enabled->GetBool())
             return;
+
+        bool skipdrag = false;
+        bool skipbaron = false;
         if (TrackedMobs.size() > 0)
         {
             for (auto it = TrackedMobs.begin(); it != TrackedMobs.end();)
             {
                 auto mob = g_ObjectManager->GetEntityByNetworkID(it->first);
-                (!mob->IsValid() || mob->IsDead()) ? TrackedMobs.erase(it++) : (++it);
+                (mob == nullptr || !mob->IsValid() || mob->IsDead()) ? TrackedMobs.erase(it++) : (++it);
             }
-        }
 
-        bool skipdrag = false;
-        bool skipbaron = false;
-
-        for (auto& tracked : TrackedMobs)
-        {
-            if (tracked.first != 0)
+            for (auto& tracked : TrackedMobs)
             {
-                auto mob = g_ObjectManager->GetEntityByNetworkID(tracked.first);
-
-                if (IsBaron(mob))
-                    skipbaron = true;
-                else if (IsDragon(mob))
-                    skipdrag = true;
-
-                if (UpdateMob(mob) && IsReady() &&
-                    MobEnabled(mob) && IsEnabled()) 
+                if (tracked.first != 0)
                 {
+                    auto mob = g_ObjectManager->GetEntityByNetworkID(tracked.first);
 
-                    R->FastCast(mob->ServerPosition());
-                    break;
+                    if (IsBaron(mob))
+                        skipbaron = true;
+                    else if (IsDragon(mob))
+                        skipdrag = true;
+
+                    if (UpdateMob(mob) && IsReady() &&
+                        MobEnabled(mob) && IsEnabled())
+                    {
+
+                        R->FastCast(mob->ServerPosition());
+                        break;
+                    }
                 }
             }
         }
+        
 
         auto jungleMobs = g_ObjectManager->GetJungleMobs();
         for (auto& mob : jungleMobs)
@@ -254,12 +259,11 @@ public:
         std::string s = "";
         for (auto& tracked : TrackedMobs)
         {
-            s += tracked.second->BaseSkin + " HPred: " + std::to_string(tracked.second->HealthPred) + " | " + std::to_string(tracked.second->DamageOnMob) +
-                "\n- Shoot: " + (tracked.second->Shoot ? "true " : "false ") + tracked.second->BlockReason + "\n";
+            s += tracked.second->BaseSkin + " HPred: " + std::to_string((int)tracked.second->HealthPred) + " | " + std::to_string((int)tracked.second->DamageOnMob) +
+                "\n- Status: " + tracked.second->Status + "\n";
         }
 
         if (s != "")
             g_Drawing->AddTextOnScreen(DrawPos, TextColor->GetColor(), 16, s.c_str());
     }
 };
-

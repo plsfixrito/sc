@@ -16,13 +16,12 @@ public:
     float TravelTime = 0;
     int Id = 0;
     bool Shoot = false;
-    bool IsActive = false;
     Vector EndPosition;
     std::string BaseSkin;
 
     bool Ended()
     {
-        return IsActive && g_Common->TickCount() > RecallEnd;
+        return g_Common->TickCount() > RecallEnd;
     }
 };
 
@@ -87,7 +86,7 @@ public:
     
     float TravelTime(Vector pos, std::shared_ptr<ISpell> spell)
     {
-        return (((pos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f)) + (IncludePing->GetBool() ? -g_Common->Ping() : 0);
+        return (((pos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f)) + (IncludePing->GetBool() ? g_Common->Ping() : 0);
     }
 
     bool IsPossible(TrackedRecall* recall)
@@ -113,7 +112,7 @@ public:
 
         auto ticksLeft = recall->RecallEnd - g_Common->TickCount();
         recall->TravelTime = TravelTime(recall->EndPosition, R);
-        auto castOffset = 50 + g_Common->Ping();
+        auto castOffset = 25 + g_Common->Ping();
         auto mod = ticksLeft - recall->TravelTime;
         return Targets->GetElement(recall->BaseSkin)->GetBool() && castOffset >= mod && ticksLeft > recall->TravelTime;
     }
@@ -248,7 +247,6 @@ public:
                 tr->EndPosition = sender->Team() == GameObjectTeam::Order ? BlueSpawn : RedSpawn;
                 tr->Id = sender->NetworkId();
                 tr->TravelTime = TravelTime(tr->EndPosition, R);
-                tr->IsActive = true;
 
                 TrackedRecalls.push_back(tr);
                 //g_Log->PrintToFile("added TrackedRecall");

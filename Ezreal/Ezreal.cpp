@@ -42,6 +42,7 @@ namespace Menu
     {
         IMenuElement* Q = nullptr;
         IMenuElement* QOnlyLastHit = nullptr;
+        IMenuElement* MinionHP = nullptr;
         IMenuElement* WTurret = nullptr;
         IMenuElement* ManaLimit = nullptr;
     }
@@ -49,7 +50,7 @@ namespace Menu
     namespace LastHit
     {
         IMenuElement* Q = nullptr;
-        IMenuElement* WTurret = nullptr;
+        IMenuElement* MinionHP = nullptr;
         IMenuElement* ManaLimit = nullptr;
     }
 
@@ -108,6 +109,11 @@ namespace Spells
     std::shared_ptr<ISpell> Heal = nullptr;
 }
 
+IPredictionOutput RPred;
+bool TryEQ = false;
+bool SkinRefresh = false;
+const char* EzrealWBuff = "ezrealwattach";
+
 BaseUlt* BUInstance;
 JungleSteal* JSInstance;
 std::map<int, IGameObject*> TurretLastTarget = std::map<int, IGameObject*>();
@@ -126,10 +132,6 @@ bool IsKillable(IGameObject* target)
         !target->HasBuffOfType(BuffType::SpellShield) && !target->HasBuffOfType(BuffType::Counter) &&
         !target->HasBuffOfType(BuffType::PhysicalImmunity) && !target->HasBuffOfType(BuffType::SpellImmunity);
 }
-
-IPredictionOutput RPred;
-bool TryEQ = false;
-bool SkinRefresh = false;
 
 Vector PredPos(IGameObject* target, float time)
 {
@@ -150,7 +152,7 @@ IPredictionOutput GetRPred(IGameObject* target)
 
 bool TurretTargetingHero(IGameObject* turret)
 {
-    return turret->IsValidTarget() &&
+    return turret != nullptr && turret->IsValidTarget() &&
         turret->CountAlliesInRange(turret->AttackRange() + turret->BoundingRadius()) + (g_LocalPlayer->IsUnderEnemyTurret() ? -1 : 0) > 0 &&
         TurretLastTarget.count(turret->NetworkId()) > 0 && TurretLastTarget[turret->NetworkId()] != nullptr &&
         TurretLastTarget[turret->NetworkId()]->IsAIHero() && TurretLastTarget[turret->NetworkId()]->NetworkId() != g_LocalPlayer->NetworkId();
@@ -158,9 +160,9 @@ bool TurretTargetingHero(IGameObject* turret)
 
 float WDamage(IGameObject* target)
 {
-    auto wDmg = (25 + (55 * Spells::W->Level()));
-    auto bonusAD = 0.6f * g_LocalPlayer->PercentBonusPhysicalDamageMod();
-    auto bonusAP = (0.65f + (Spells::W->Level() * 0.05f)) * g_LocalPlayer->TotalAbilityPower();
+    const auto wDmg = (25.f + (55.f * Spells::W->Level()));
+    const auto bonusAD = 0.6f * g_LocalPlayer->PercentBonusPhysicalDamageMod();
+    const auto bonusAP = (0.65f + (Spells::W->Level() * 0.05f)) * g_LocalPlayer->TotalAbilityPower();
     return g_Common->CalculateDamageOnUnit(g_LocalPlayer, target, DamageType::Magical, wDmg + bonusAD + bonusAP);
 }
 
@@ -168,17 +170,17 @@ float QDamage(IGameObject* target)
 {
     auto dmg = 0.f;
 
-    if (target->HasBuff("ezrealwattach"))
+    if (target->HasBuff(EzrealWBuff))
         dmg += WDamage(target);
 
-    auto ad = 5 + (Spells::Q->Level() * 25) + (1.2f * g_LocalPlayer->TotalAttackDamage());
-    auto ap = 0.15f * g_LocalPlayer->TotalAbilityPower();
+    const auto ad = 5.f + (Spells::Q->Level() * 25.f) + (1.2f * g_LocalPlayer->TotalAttackDamage());
+    const auto ap = 0.15f * g_LocalPlayer->TotalAbilityPower();
     return dmg + g_Common->CalculateDamageOnUnit(g_LocalPlayer, target, DamageType::Physical, ad + ap);
 }
 
 float HealthPrediction(IGameObject* target, std::shared_ptr<ISpell> spell, Vector castPos)
 {
-    auto travelTime = (((castPos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f));
+    const auto travelTime = (((castPos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f));
     return g_HealthPrediction->GetHealthPrediction(target, travelTime);
 }
 
@@ -190,7 +192,7 @@ float HealthPrediction(IGameObject* target, std::shared_ptr<ISpell> spell)
 float RHealthPrediction(IGameObject* target)
 {
     RPred = GetRPred(target);
-    auto travelTime = (((RPred.CastPosition.Distance(g_LocalPlayer->Position()) / Spells::R->Speed()) * 1000.f) + (Spells::R->Delay() * 1000.f));
+    const auto travelTime = (((RPred.CastPosition.Distance(g_LocalPlayer->Position()) / Spells::R->Speed()) * 1000.f) + (Spells::R->Delay() * 1000.f));
     return g_HealthPrediction->GetHealthPrediction(target, travelTime);
 }
 
@@ -202,8 +204,8 @@ float GetDamage(IGameObject* target, std::shared_ptr<ISpell> spell)
             return g_Common->TickCount() - t->LastCheck > 100;
         }), DamageCache.end());
 
-    bool isaa = spell == nullptr;
-    for (auto& dc : DamageCache)
+    const bool isaa = spell == nullptr;
+    for (const auto& dc : DamageCache)
     {
         if (dc->UnitId == target->NetworkId() && (isaa ? dc->Slot == SpellSlot::Invalid : spell->Slot() == dc->Slot))
             return dc->Damage;
@@ -217,6 +219,7 @@ float GetDamage(IGameObject* target, std::shared_ptr<ISpell> spell)
         spell->Slot() == SpellSlot::Q ? QDamage(target) : 
         spell->Slot() == SpellSlot::W ? WDamage(target) : 
         spell->Damage(target);
+
     DamageCache.push_back(ndc);
 
     return ndc->Damage;
@@ -236,33 +239,30 @@ std::vector<IGameObject*> SortByHealth(std::vector<IGameObject*> targets) {
 }
 
 std::vector<IGameObject*> SortByMaxHealth(std::vector<IGameObject*> targets) {
-    sort(targets.begin(), targets.end(), compareMaxHealth);
+    sort(targets.begin(), targets.end(), [](IGameObject* a, IGameObject* b) {return a->MaxHealth() > b->MaxHealth(); });
     return targets;
 }
 
-IPredictionOutput* GetLastHitMinion(std::vector<IGameObject*> minions)
+IPredictionOutput* GetLastHitMinion(std::vector<IGameObject*> minions, bool useHP = true)
 {
-    minions.erase(std::remove_if(minions.begin(), minions.end(),
-        [](IGameObject* t) -> bool
-        {
-            if (t == nullptr ||
-                !t->IsValidTarget(Spells::Q->Range()) || 
-                (g_Orbwalker->GetLastTarget() != nullptr && g_Orbwalker->GetLastTarget()->NetworkId() == t->NetworkId()))
-                return true;
-
-            auto healthpred = HealthPrediction(t, Spells::Q);
-            // will die before Q reach or unkillable
-            return healthpred < 0 || GetDamage(t, Spells::Q) < healthpred;
-        }), minions.end());
-
     //minions = SortByHealth(minions);
-    for (auto& minion : minions)
+    for (const auto& t : minions)
     {
-        // orbwalker should take care of this minion
-        if (g_LocalPlayer->IsInAutoAttackRange(minion) && g_Orbwalker->CanAttack())
+        if (t == nullptr ||
+            !t->IsValidTarget(Spells::Q->Range()) ||
+            (g_Orbwalker->GetLastTarget() != nullptr && g_Orbwalker->GetLastTarget()->NetworkId() == t->NetworkId()))
             continue;
 
-        auto pred = GetPred(minion, Spells::Q, g_LocalPlayer->Position());
+        auto healthpred = HealthPrediction(t, Spells::Q);
+        // will die before Q reach or unkillable
+        if (healthpred <= 0 || GetDamage(t, Spells::Q) < (useHP ? healthpred : t->Health()))
+            continue;
+
+        // orbwalker should take care of this minion
+        if (g_LocalPlayer->IsInAutoAttackRange(t) && g_Orbwalker->CanAttack())
+            continue;
+
+        auto pred = GetPred(t, Spells::Q, g_LocalPlayer->Position());
 
         // unhittable
         if (pred.Hitchance < HitChance::Low)
@@ -276,27 +276,24 @@ IPredictionOutput* GetLastHitMinion(std::vector<IGameObject*> minions)
 
 IPredictionOutput* GetLaneClearMinion(std::vector<IGameObject*> minions)
 {
-    minions.erase(std::remove_if(minions.begin(), minions.end(),
-        [](IGameObject* t) -> bool
-        {
-            if (t == nullptr ||
-                !t->IsValidTarget(Spells::Q->Range()) ||
-                (g_Orbwalker->GetLastTarget() != nullptr && g_Orbwalker->GetLastTarget()->NetworkId() == t->NetworkId()))
-                return true;
-
-            auto healthpred = HealthPrediction(t, Spells::Q);
-            // will die before Q reach
-            return healthpred <= 0;
-        }), minions.end());
-
     //minions = SortByHealth(minions);
-    for (auto& minion : minions)
+    for (const auto& t : minions)
     {
-        // orbwalker should take care of this minion
-        if (g_LocalPlayer->IsInAutoAttackRange(minion) && g_Orbwalker->CanAttack())
+        if (t == nullptr ||
+            !t->IsValidTarget(Spells::Q->Range()) ||
+            (g_Orbwalker->GetLastTarget() != nullptr && g_Orbwalker->GetLastTarget()->NetworkId() == t->NetworkId()))
             continue;
 
-        auto pred = GetPred(minion, Spells::Q, g_LocalPlayer->Position());
+        auto healthpred = HealthPrediction(t, Spells::Q);
+        // will die before Q reach
+        if (healthpred <= 0)
+            continue;
+
+        // orbwalker should take care of this minion
+        if (g_LocalPlayer->IsInAutoAttackRange(t) && g_Orbwalker->CanAttack())
+            continue;
+
+        auto pred = GetPred(t, Spells::Q, g_LocalPlayer->Position());
 
         // unhittable
         if (pred.Hitchance < HitChance::Medium)
@@ -310,27 +307,21 @@ IPredictionOutput* GetLaneClearMinion(std::vector<IGameObject*> minions)
 
 IPredictionOutput* GetJungleClearMinion()
 {
-    auto minions = g_ObjectManager->GetJungleMobs();
-
-    minions.erase(std::remove_if(minions.begin(), minions.end(),
-        [](IGameObject* t) -> bool
-        {
-            if (!t->IsValidTarget(Spells::Q->Range()))
-                return true;
-
-            auto healthpred = HealthPrediction(t, Spells::Q);
-            // will die before Q reach
-            return healthpred <= 0;
-        }), minions.end());
-
-    minions = SortByMaxHealth(minions);
-    for (auto& minion : minions)
+    for (const auto& t : SortByMaxHealth(g_ObjectManager->GetJungleMobs()))
     {
-        // orbwalker should take care of this minion
-        if (g_LocalPlayer->IsInAutoAttackRange(minion) && g_Orbwalker->CanAttack())
+        if (t == nullptr || !t->IsValidTarget(Spells::Q->Range()))
             continue;
 
-        auto pred = GetPred(minion, Spells::Q, g_LocalPlayer->Position());
+        auto healthpred = HealthPrediction(t, Spells::Q);
+        // will die before Q reach
+        if (healthpred <= 0)
+            continue;
+
+        // orbwalker should take care of this minion
+        if (g_LocalPlayer->IsInAutoAttackRange(t) && g_Orbwalker->CanAttack())
+            continue;
+
+        auto pred = GetPred(t, Spells::Q, g_LocalPlayer->Position());
 
         // unhittable
         if (pred.Hitchance < HitChance::Medium)
@@ -344,27 +335,21 @@ IPredictionOutput* GetJungleClearMinion()
 
 IPredictionOutput* GetKSTarget()
 {
-    auto targets = g_ObjectManager->GetChampions(false);
-
-    targets.erase(std::remove_if(targets.begin(), targets.end(),
-        [](IGameObject* t) -> bool
-        {
-            if (!t->IsValidTarget(Spells::Q->Range()) || !IsKillable(t))
-                return true;
-
-            auto healthpred = HealthPrediction(t, Spells::Q);
-            // will die before Q reach or unkillable
-            return healthpred <= 0 || GetDamage(t, Spells::Q) < healthpred;
-        }), targets.end());
-
-    //targets = SortByHealth(targets);
-    for (auto& target : targets)
+    for (const auto& t : g_ObjectManager->GetChampions(false))
     {
-        // orbwalker should take care of this target
-        if (g_LocalPlayer->IsInAutoAttackRange(target) && g_Orbwalker->CanAttack())
+        if (t == nullptr || !t->IsValidTarget(Spells::Q->Range()) || !IsKillable(t))
             continue;
 
-        auto pred = GetPred(target, Spells::Q, g_LocalPlayer->Position());
+        auto healthpred = HealthPrediction(t, Spells::Q);
+        // will die before Q reach or unkillable
+        if (healthpred <= 0 || GetDamage(t, Spells::Q) < healthpred)
+            continue;
+
+        // orbwalker should take care of this target
+        if (g_LocalPlayer->IsInAutoAttackRange(t) && g_Orbwalker->CanAttack())
+            continue;
+
+        auto pred = GetPred(t, Spells::Q, g_LocalPlayer->Position());
 
         // unhittable
         if (pred.Hitchance < HitChance::High)
@@ -384,7 +369,7 @@ bool CastE(IGameObject* target)
         return false;
     }
 
-    Vector extended = g_LocalPlayer->Position().Extend(g_Common->CursorPosition(), Spells::E->Range());
+    const auto extended = g_LocalPlayer->Position().Extend(g_Common->CursorPosition(), Spells::E->Range());
 
     if (extended.IsUnderEnemyTurret())
     {
@@ -396,14 +381,17 @@ bool CastE(IGameObject* target)
                 return !t->IsInAutoAttackRange(extended);
             }), turrets.end());
 
-        if (!TurretTargetingHero(turrets[0])) {
+        if (turrets.size() > 0)
+        {
+            if (!TurretTargetingHero(turrets[0])) {
 
-            ECase = "TurretTargetingHero";
-            return false;
+                ECase = "TurretTargetingHero";
+                return false;
+            }
         }
     }
 
-    auto epred = PredPos(target, Spells::E->Delay());
+    const auto epred = PredPos(target, Spells::E->Delay());
     if (g_LocalPlayer->IsUnderEnemyTurret())
     {
         if (!extended.IsUnderEnemyTurret() && extended.Distance(epred) < g_LocalPlayer->AttackRange())
@@ -429,7 +417,7 @@ bool CastE(IGameObject* target)
     }*/
 
     
-    auto aadmg = GetDamage(target, nullptr);
+    const auto aadmg = GetDamage(target, nullptr);
 
     if (!Menu::Combo::EAA->GetBool() && aadmg > target->RealHealth(true, false))
     {
@@ -439,7 +427,7 @@ bool CastE(IGameObject* target)
         }
     }
 
-    auto qpred = GetPred(target, Spells::Q, extended);
+    const auto qpred = GetPred(target, Spells::Q, extended);
     if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady() && Menu::Combo::EQ->GetBool())
     {
         if (qpred.Hitchance >= HitChance::High &&
@@ -452,8 +440,8 @@ bool CastE(IGameObject* target)
             }
         }
     }
-    
-    auto tdis = target->Distance(extended);
+
+    const auto tdis = epred.Distance(extended);
     if (tdis < Spells::E->Radius())
     {
         auto comboDmg = GetDamage(target, Spells::E);
@@ -481,7 +469,7 @@ bool CastE(IGameObject* target)
             return Spells::E->Cast(extended);
 
 
-        if (target->HasBuff("ezrealwattach") && g_LocalPlayer->Mana() - mana > 0)
+        if (target->HasBuff(EzrealWBuff) && g_LocalPlayer->Mana() - mana > 0)
             return Spells::E->Cast(extended);
     }
 
@@ -494,7 +482,7 @@ bool RAoE(int hits)
     auto targets = g_ObjectManager->GetChampions(false);
     std::vector<Vector> positions = std::vector<Vector>();
 
-    for (auto& target : targets)
+    for (const auto& target : targets)
     {
         if (target == nullptr || !target->IsValidTarget(Menu::Combo::RRange->GetInt() + 150))
             continue;
@@ -561,7 +549,7 @@ bool HandleCombo()
         }
     }
 
-    auto qTarget = g_Common->GetTarget(Spells::Q->Range() + 50, DamageType::Physical);
+    const auto qTarget = g_Common->GetTarget(Spells::Q->Range() + 50, DamageType::Physical);
     if (qTarget == nullptr || !qTarget->IsValidTarget() || !IsKillable(qTarget))
         return false;
 
@@ -571,7 +559,7 @@ bool HandleCombo()
     if (Menu::Combo::E->GetBool() && Spells::E->IsReady() && CastE(qTarget))
         return false;
 
-    auto qPred = GetPred(qTarget, Spells::Q, g_LocalPlayer->Position());
+    const auto qPred = GetPred(qTarget, Spells::Q, g_LocalPlayer->Position());
     if (!TryEQ)
     {
         if (Menu::Combo::W->GetBool() && Spells::W->IsReady() && Spells::Q->IsReady() &&
@@ -585,7 +573,7 @@ bool HandleCombo()
 
     if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady())
     {
-        if (qPred.Hitchance >= ((TryEQ || qTarget->HasBuff("ezrealwattach")) ? HitChance::Low : HitChance::Medium))
+        if (qPred.Hitchance >= ((TryEQ || qTarget->HasBuff(EzrealWBuff)) ? HitChance::Low : HitChance::Medium))
         {
             Spells::Q->Cast(qPred.CastPosition);
             TryEQ = false;
@@ -632,7 +620,11 @@ bool HandleLaneClear()
         return false;
 
     auto minions = g_ObjectManager->GetMinionsEnemy();
-    auto lastHit = GetLastHitMinion(minions);
+
+    if (minions.size() == 0)
+        return false;
+
+    auto lastHit = GetLastHitMinion(minions, Menu::LaneClear::MinionHP->GetBool());
     if (lastHit != nullptr)
     {
         Spells::Q->Cast(lastHit->CastPosition);
@@ -682,7 +674,7 @@ bool HandleLasthit()
     if (!Menu::LastHit::Q->GetBool() || !Spells::Q->IsReady())
         return false;
 
-    auto lastHit = GetLastHitMinion(g_ObjectManager->GetMinionsEnemy());
+    auto lastHit = GetLastHitMinion(g_ObjectManager->GetMinionsEnemy(), Menu::LastHit::MinionHP->GetBool());
     if (lastHit != nullptr)
     {
         Spells::Q->Cast(lastHit->CastPosition);
@@ -706,6 +698,12 @@ void HandleKS()
 
 bool CanTear()
 {
+    if (g_LocalPlayer->HasItem(ItemId::Muramana) ||
+        g_LocalPlayer->HasItem(ItemId::Muramana_1) ||
+        g_LocalPlayer->HasItem(ItemId::Seraphs_Embrace) ||
+        g_LocalPlayer->HasItem(ItemId::Seraphs_Embrace_1))
+        return false;
+
     return g_LocalPlayer->HasItem(ItemId::Tear_of_the_Goddess) ||
         g_LocalPlayer->HasItem(ItemId::Tear_of_the_Goddess_Quick_Charge) ||
         g_LocalPlayer->HasItem(ItemId::Manamune) ||
@@ -779,232 +777,293 @@ bool IsStructure(IGameObject* target)
 {
     auto type = target->Type();
     return type == EntityType::AITurretClient || type == EntityType::BarracksDampener ||
-        type == EntityType::HQ || type == EntityType::Barracks;
+        type == EntityType::HQ;
 }
 
 void OnGameUpdate()
 {
-    JSInstance->OnGameUpdate();
-    BUInstance->OnUpdate();
-
-    if (Menu::Combo::RDistance->GetInt() + 100 >= Menu::Combo::RRange->GetInt())
-        Menu::Combo::RRange->SetInt(Menu::Combo::RDistance->GetInt() + 100);
-
-    if (!Menu::Toggle->GetBool())
-        return;
-    
-    if (g_LocalPlayer->IsDead())
+    try
     {
-        SkinRefresh = true;
-        return;
+        JSInstance->OnGameUpdate();
+        BUInstance->OnUpdate();
+
+        if (Menu::Combo::RDistance->GetInt() + 100 >= Menu::Combo::RRange->GetInt())
+            Menu::Combo::RRange->SetInt(Menu::Combo::RDistance->GetInt() + 100);
+
+        if (!Menu::Toggle->GetBool())
+            return;
+
+        if (g_LocalPlayer->IsDead())
+        {
+            SkinRefresh = true;
+            return;
+        }
+
+        // avoid useless code to run while casting stuff
+        if (g_LocalPlayer->GetSpellbook()->IsCastingSpell() || g_LocalPlayer->GetSpellbook()->IsChanneling())
+            return;
+
+        HandleKS();
+
+        if (SemiManualR())
+            return;
+
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo))
+            if (HandleCombo())
+                return;
+
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeHarass))
+            if (HandleHarass())
+                return;
+
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeLaneClear))
+        {
+            if (HandleLaneClear() || HandleJungleClear())
+                return;
+        }
+
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeFarm))
+            if (HandleLasthit())
+                return;
+
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeMixed))
+        {
+            if (HandleLasthit() || HandleHarass())
+                return;
+        }
+
+        if (g_Orbwalker->GetOrbwalkingMode() == 0)
+            StackTear();
+
+        UpdateSkin();
     }
-
-    // avoid useless code to run while casting stuff
-    if (g_LocalPlayer->GetSpellbook()->IsCastingSpell() || g_LocalPlayer->GetSpellbook()->IsChanneling())
-        return;
-
-    HandleKS();
-
-    if (SemiManualR())
-        return;
-
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo))
-        if (HandleCombo())
-            return;
-
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeHarass))
-        if (HandleHarass())
-            return;
-
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeLaneClear))
+    catch (const std::exception & e)
     {
-        if (HandleLaneClear() || HandleJungleClear())
-            return;
+        g_Log->PrintToFile(e.what());
     }
-
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeFarm))
-        if (HandleLasthit())
-            return;
-
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeMixed)) 
-    {
-        if (HandleLasthit() || HandleHarass())
-            return;
-    }
-
-    if (g_Orbwalker->GetOrbwalkingMode() == 0)
-        StackTear();
-
-    UpdateSkin();
 }
 
 const auto CirclesWidth = 1.f;
 
 void OnHudDraw()
 {
-    JSInstance->OnHudDraw();
+    try
+    {
+        JSInstance->OnHudDraw();
 
-    if (!Menu::Toggle->GetBool() || !Menu::Drawings::Toggle->GetBool())
-        return;
-    
-    auto PlayerPosition = g_LocalPlayer->Position();
+        if (!Menu::Toggle->GetBool() || !Menu::Drawings::Toggle->GetBool())
+            return;
 
-    if (Menu::Drawings::Q->GetBool())
-        g_Drawing->AddCircle(PlayerPosition, Spells::Q->Range(), Menu::Colors::Q->GetColor(), CirclesWidth);
+        auto PlayerPosition = g_LocalPlayer->Position();
 
-    if (Menu::Drawings::W->GetBool())
-        g_Drawing->AddCircle(PlayerPosition, Spells::W->Range(), Menu::Colors::W->GetColor(), CirclesWidth);
+        if (Menu::Drawings::Q->GetBool())
+            g_Drawing->AddCircle(PlayerPosition, Spells::Q->Range(), Menu::Colors::Q->GetColor(), CirclesWidth);
 
-    if (Menu::Drawings::E->GetBool())
-        g_Drawing->AddCircle(PlayerPosition, Spells::E->Range(), Menu::Colors::E->GetColor(), CirclesWidth);
+        if (Menu::Drawings::W->GetBool())
+            g_Drawing->AddCircle(PlayerPosition, Spells::W->Range(), Menu::Colors::W->GetColor(), CirclesWidth);
 
-    if (Menu::Drawings::R->GetBool())
-        g_Drawing->AddCircle(PlayerPosition, Menu::Combo::RRange->GetInt(), Menu::Colors::R->GetColor(), CirclesWidth);
+        if (Menu::Drawings::E->GetBool())
+            g_Drawing->AddCircle(PlayerPosition, Spells::E->Range(), Menu::Colors::E->GetColor(), CirclesWidth);
 
-    if (Menu::Drawings::RDistance->GetBool())
-        g_Drawing->AddCircle(PlayerPosition, Menu::Combo::RDistance->GetInt(), Menu::Colors::RDistance->GetColor(), CirclesWidth);
+        if (Menu::Drawings::R->GetBool())
+            g_Drawing->AddCircle(PlayerPosition, Menu::Combo::RRange->GetInt(), Menu::Colors::R->GetColor(), CirclesWidth);
 
+        if (Menu::Drawings::RDistance->GetBool())
+            g_Drawing->AddCircle(PlayerPosition, Menu::Combo::RDistance->GetInt(), Menu::Colors::RDistance->GetColor(), CirclesWidth);
+
+    }
+    catch (const std::exception & e)
+    {
+        g_Log->PrintToFile(e.what());
+    }
     //g_Drawing->AddTextOnScreen(Vector2(g_Renderer->ScreenWidth() * 0.0130208333333333f, g_Renderer->ScreenHeight() * 0.45f), Menu::Colors::Q->GetColor(), 16, ECase.c_str());
 }
 
 void OnProcessSpellCast(IGameObject* sender, OnProcessSpellEventArgs* args)
 {
-    if (sender->IsEnemy())
-    {
-        if (args->Target != nullptr && args->Target->IsMe() && (args->IsAutoAttack || args->SpellSlot != SpellSlot::Invalid))
-        {
-            if (Menu::Misc::UseHeal->GetBool() && IsKillable(g_LocalPlayer))
-            {
-                auto incdmg = args->IsAutoAttack ? sender->AutoAttackDamage(g_LocalPlayer, true) : g_Common->GetSpellDamage(sender, g_LocalPlayer, args->SpellSlot, false);
-                auto healthAfterDmg = ((g_LocalPlayer->RealHealth(true, true) - incdmg) / g_LocalPlayer->MaxHealth()) * 100.f;
+    if (sender == nullptr || args->Target == nullptr)
+        return;
 
-                if (healthAfterDmg < Menu::Misc::HealPercent->GetInt())
+    try
+    {
+        if (sender->IsEnemy())
+        {
+            if (args->Target != nullptr && args->Target->IsMe() && (args->IsAutoAttack || args->SpellSlot != SpellSlot::Invalid))
+            {
+                if (Menu::Misc::UseHeal->GetBool() && IsKillable(g_LocalPlayer))
                 {
-                    if (sender->IsAIHero() || healthAfterDmg <= 0)
+                    auto incdmg = args->IsAutoAttack ? sender->AutoAttackDamage(g_LocalPlayer, true) : g_Common->GetSpellDamage(sender, g_LocalPlayer, args->SpellSlot, false);
+                    auto healthAfterDmg = ((g_LocalPlayer->RealHealth(true, true) - incdmg) / g_LocalPlayer->MaxHealth()) * 100.f;
+
+                    if (healthAfterDmg < Menu::Misc::HealPercent->GetInt())
                     {
-                        if (Spells::Heal != nullptr && Spells::Heal->IsReady())
+                        if (sender->IsAIHero() || healthAfterDmg <= 0)
                         {
-                            g_Common->ChatPrint("USE HEAL");
-                            std::string inc = " HAD:" + std::to_string(healthAfterDmg);
-                            std::string incp = inc + " INCD: " + std::to_string(incdmg);
-                            std::string s = sender->BaseSkinName() + incp;
-                            g_Common->ChatPrint(s.c_str());
-                            Spells::Heal->Cast();
-                            return;
+                            if (Spells::Heal != nullptr && Spells::Heal->IsReady())
+                            {
+                                g_Common->ChatPrint("USE HEAL");
+                                std::string inc = " HAD:" + std::to_string(healthAfterDmg);
+                                std::string incp = inc + " INCD: " + std::to_string(incdmg);
+                                std::string s = sender->BaseSkinName() + incp;
+                                g_Common->ChatPrint(s.c_str());
+                                Spells::Heal->Cast();
+                                return;
+                            }
                         }
                     }
                 }
             }
         }
+
+        if (!sender->IsAITurret())
+            return;
+
+        TurretLastTarget[sender->NetworkId()] = args->Target;
     }
-
-    if (!sender->IsAITurret())
-        return;
-
-    TurretLastTarget[sender->NetworkId()] = args->Target;
+    catch (const std::exception & e)
+    {
+        g_Log->PrintToFile(e.what());
+    }
 }
 
 void OnBeforeAttackOrbwalker(BeforeAttackOrbwalkerArgs* args)
 {
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo))
+    if (args->Target == nullptr || !args->Target->IsValid())
+        return;
+
+    try
     {
-        if (args->Target->IsAIHero())
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo))
         {
-            if (Menu::Misc::UseBotrk->GetBool() && args->Target->Distance(g_LocalPlayer) < 650)
+            if (args->Target->IsAIHero())
             {
-                if (g_LocalPlayer->CanUseItem(ItemId::Blade_of_the_Ruined_King))
+                if (Menu::Misc::UseBotrk->GetBool() && args->Target->Distance(g_LocalPlayer) < 650)
                 {
-                    g_LocalPlayer->CastItem(ItemId::Blade_of_the_Ruined_King, args->Target);
-                    return;
-                }
-                
-                if (g_LocalPlayer->CanUseItem(ItemId::Bilgewater_Cutlass))
-                {
-                    g_LocalPlayer->CastItem(ItemId::Bilgewater_Cutlass, args->Target);
-                    return;
+                    if (g_LocalPlayer->CanUseItem(ItemId::Blade_of_the_Ruined_King))
+                    {
+                        g_LocalPlayer->CastItem(ItemId::Blade_of_the_Ruined_King, args->Target);
+                        return;
+                    }
+
+                    if (g_LocalPlayer->CanUseItem(ItemId::Bilgewater_Cutlass))
+                    {
+                        g_LocalPlayer->CastItem(ItemId::Bilgewater_Cutlass, args->Target);
+                        return;
+                    }
+
+                    if (g_LocalPlayer->CanUseItem(ItemId::Hextech_Gunblade))
+                    {
+                        g_LocalPlayer->CastItem(ItemId::Hextech_Gunblade, args->Target);
+                        return;
+                    }
                 }
 
-                if (g_LocalPlayer->CanUseItem(ItemId::Hextech_Gunblade))
+                if (Menu::Combo::W->GetBool() && Spells::W->IsReady())
                 {
-                    g_LocalPlayer->CastItem(ItemId::Hextech_Gunblade, args->Target);
+                    args->Process = !Spells::W->Cast(args->Target, HitChance::Low);
+                    return;
+                }
+                if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady())
+                {
+                    args->Process = !Spells::Q->Cast(args->Target, HitChance::Low);
+                    return;
+                }
+            }
+        }
+
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeLaneClear))
+        {
+            if (IsStructure(args->Target))
+            {
+                if (Menu::LaneClear::ManaLimit->GetInt() >= g_LocalPlayer->ManaPercent())
+                    return;
+
+                if (Menu::LaneClear::WTurret->GetBool() && Spells::W->IsReady())
+                {
+                    args->Process = !Spells::W->Cast(args->Target->Position());
                     return;
                 }
             }
 
-            if (Menu::Combo::W->GetBool() && Spells::W->IsReady())
+            if (args->Target->IsEpicMonster())
             {
-                args->Process = !Spells::W->Cast(args->Target, HitChance::Low);
-                return;
-            }
-            if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady())
-            {
-                args->Process = !Spells::Q->Cast(args->Target, HitChance::Low);
-                return;
+                if (Menu::JungleClear::ManaLimit->GetInt() >= g_LocalPlayer->ManaPercent())
+                    return;
+
+                if (Menu::JungleClear::W->GetBool() && Spells::W->IsReady())
+                {
+                    args->Process = !Spells::W->Cast(args->Target, HitChance::Low);
+                    return;
+                }
             }
         }
     }
-
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeLaneClear))
+    catch (const std::exception& e)
     {
-        if (IsStructure(args->Target))
-        {
-            if (Menu::LaneClear::ManaLimit->GetInt() >= g_LocalPlayer->ManaPercent())
-                return;
-
-            if (Menu::LaneClear::WTurret->GetBool() && Spells::W->IsReady())
-            {
-                args->Process = !Spells::W->Cast(args->Target->Position());
-                return;
-            }
-        }
-
-        if (args->Target->IsEpicMonster())
-        {
-            if (Menu::JungleClear::ManaLimit->GetInt() >= g_LocalPlayer->ManaPercent())
-                return;
-
-            if (Menu::JungleClear::W->GetBool() && Spells::W->IsReady())
-            {
-                args->Process = !Spells::W->Cast(args->Target, HitChance::Low);
-                return;
-            }
-        }
+        g_Log->PrintToFile(e.what());
     }
 }
 
 void OnAfterAttackOrbwalker(IGameObject* target)
 {
-    if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo))
+    if (target == nullptr || !target->IsValid())
+        return;
+
+    try
     {
-        if (target->IsAIHero())
+        if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo))
         {
-            if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady())
+            if (target->IsAIHero())
             {
-                Spells::Q->Cast(target, HitChance::Low);
+                if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady())
+                {
+                    Spells::Q->Cast(target, HitChance::Low);
+                }
             }
         }
+    }
+    catch (const std::exception & e)
+    {
+        g_Log->PrintToFile(e.what());
     }
 }
 
 void OnTeleport(IGameObject* sender, OnTeleportEventArgs* args)
 {
-    BUInstance->OnTeleport(sender, args);
+    if (sender == nullptr || !sender->IsValid())
+        return;
+
+    try
+    {
+        BUInstance->OnTeleport(sender, args);
+    }
+    catch (const std::exception & e)
+    {
+        g_Log->PrintToFile(e.what());
+    }
 }
 
 void OnEndScene()
 {
-    BUInstance->OnEndScene();
+    try
+    {
+        BUInstance->OnEndScene();
+    }
+    catch (const std::exception & e)
+    {
+        g_Log->PrintToFile(e.what());
+    }
 }
 
 PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk) 
 {
     DECLARE_GLOBALS(plugin_sdk);
     
-    Spells::Q = g_Common->AddSpell(SpellSlot::Q, 1100.f);
-    Spells::Q->SetSkillshot(.25f, 62.5f, 2000.f, kCollidesWithYasuoWall | kCollidesWithHeroes | kCollidesWithMinions, eSkillshotType::kSkillshotLine);
+    Spells::Q = g_Common->AddSpell(SpellSlot::Q, 1150.f);
+    Spells::Q->SetSkillshot(.25f, 60.f, 2000.f, kCollidesWithYasuoWall | kCollidesWithHeroes | kCollidesWithMinions, eSkillshotType::kSkillshotLine);
 
     Spells::W = g_Common->AddSpell(SpellSlot::W, 1150.f);
-    Spells::W->SetSkillshot(.25f, 65.f, 2000.f, kCollidesWithNothing, eSkillshotType::kSkillshotLine);
+    Spells::W->SetSkillshot(.25f, 65.f, 1500.f, kCollidesWithNothing, eSkillshotType::kSkillshotLine);
 
     Spells::E = g_Common->AddSpell(SpellSlot::E, 475.f);
     Spells::E->SetSkillshot(.25f, 750.f, 999999.f, kCollidesWithNothing, eSkillshotType::kSkillshotCircle);
@@ -1012,14 +1071,9 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
     Spells::R = g_Common->AddSpell(SpellSlot::R, 250000.f);
     Spells::R->SetSkillshot(1.f, 320.f, 2000.f, kCollidesWithYasuoWall, eSkillshotType::kSkillshotLine);
 
-    for (auto spell : g_LocalPlayer->GetSpellbook()->GetSpells())
-    {
-        if (spell->SData().SpellName == "SummonerHeal")
-        {
-            Spells::Heal = g_Common->AddSpell(g_LocalPlayer->GetSpellbook()->GetSpellSlotFromName("SummonerHeal"), 800.f);
-            break;
-        }
-    }
+    auto heal = g_LocalPlayer->GetSpellbook()->GetSpellSlotFromName("SummonerHeal");
+    if (heal != SpellSlot::Invalid)
+        Spells::Heal = g_Common->AddSpell(heal, 800.f);
 
     using namespace Menu;
     MenuInstance = g_Menu->CreateMenu("kEzreal", "kappa_ezreal");
@@ -1047,11 +1101,13 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
     const auto LaneClearMenu = MenuInstance->AddSubMenu("Lane Clear", "laneclear");
     LaneClear::Q = LaneClearMenu->AddCheckBox("Use Q", "q", true);
     LaneClear::QOnlyLastHit = LaneClearMenu->AddCheckBox("Q Only Last Hit", "QOnlyLastHit", true);
+    LaneClear::MinionHP = LaneClearMenu->AddCheckBox("Use Health Prediction", "MinionHP", true);
     LaneClear::WTurret = LaneClearMenu->AddCheckBox("Use W On Turrets", "WTurret", true);
     LaneClear::ManaLimit = LaneClearMenu->AddSlider("Mana Limit", "manalimit", 50, 0, 99);
 
     const auto LastHitMenu = MenuInstance->AddSubMenu("Last Hit", "lasthit");
     LastHit::Q = LastHitMenu->AddCheckBox("Use Q", "q", true);
+    LastHit::MinionHP = LastHitMenu->AddCheckBox("Use Health Prediction", "MinionHP", true);
     LastHit::ManaLimit = LastHitMenu->AddSlider("Mana Limit", "manalimit", 50, 0, 99);
 
     const auto JungleClearMenu = MenuInstance->AddSubMenu("Jungle Clear", "jungleclear");

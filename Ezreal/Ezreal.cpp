@@ -3,10 +3,19 @@
 #include "../SDK/EventHandler.h"
 #include "../SDK/Geometry.h"
 #include "../SDK/PluginSDK_Enums.h"
+#include <fstream>
 
 #include "JungleSteal.h"
 #include "BaseUlt.h"
-#include "Utilities.h"
+
+class PreCalculatedDamage
+{
+public:
+    int UnitId;
+    int LastCheck;
+    float Damage;
+    SpellSlot Slot;
+};
 
 PLUGIN_API const char PLUGIN_PRINT_NAME[32] = "Ezreal";
 PLUGIN_API const char PLUGIN_PRINT_AUTHOR[32] = "NotKappa";
@@ -63,20 +72,12 @@ namespace Menu
 
     namespace Misc
     {
-        namespace SkinHack
-        {
-            IMenuElement* Enabled = nullptr;
-            IMenuElement* SelectedSkin = nullptr;
-        }
-
         IMenuElement* SemiManualR = nullptr;
         IMenuElement* QKillSteal = nullptr;
         IMenuElement* QStack = nullptr;
         IMenuElement* QInSpawn = nullptr;
         IMenuElement* QAwayFromEnemy = nullptr;
         IMenuElement* StackManaLimit = nullptr;
-        IMenuElement* UseHeal = nullptr;
-        IMenuElement* HealPercent = nullptr;
         IMenuElement* UseBotrk = nullptr;
     }
 
@@ -106,12 +107,10 @@ namespace Spells
     std::shared_ptr<ISpell> W = nullptr;
     std::shared_ptr<ISpell> E = nullptr;
     std::shared_ptr<ISpell> R = nullptr;
-    std::shared_ptr<ISpell> Heal = nullptr;
 }
 
 IPredictionOutput RPred;
 bool TryEQ = false;
-bool SkinRefresh = false;
 const char* EzrealWBuff = "ezrealwattach";
 
 BaseUlt* BUInstance;
@@ -180,7 +179,7 @@ float QDamage(IGameObject* target)
 
 float HealthPrediction(IGameObject* target, std::shared_ptr<ISpell> spell, Vector castPos)
 {
-    const auto travelTime = (((castPos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f));
+    const auto travelTime = (((castPos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f)) / 1000.f;
     return g_HealthPrediction->GetHealthPrediction(target, travelTime);
 }
 
@@ -192,7 +191,7 @@ float HealthPrediction(IGameObject* target, std::shared_ptr<ISpell> spell)
 float RHealthPrediction(IGameObject* target)
 {
     RPred = GetRPred(target);
-    const auto travelTime = (((RPred.CastPosition.Distance(g_LocalPlayer->Position()) / Spells::R->Speed()) * 1000.f) + (Spells::R->Delay() * 1000.f));
+    const auto travelTime = (((RPred.CastPosition.Distance(g_LocalPlayer->Position()) / Spells::R->Speed()) * 1000.f) + (Spells::R->Delay() * 1000.f)) / 1000.f;
     return g_HealthPrediction->GetHealthPrediction(target, travelTime);
 }
 
@@ -246,7 +245,7 @@ std::vector<IGameObject*> SortByMaxHealth(std::vector<IGameObject*> targets) {
 IPredictionOutput* GetLastHitMinion(std::vector<IGameObject*> minions, bool useHP = true)
 {
     //minions = SortByHealth(minions);
-    for (const auto& t : minions)
+    for (auto& t : minions)
     {
         if (t == nullptr ||
             !t->IsValidTarget(Spells::Q->Range()) ||
@@ -277,7 +276,7 @@ IPredictionOutput* GetLastHitMinion(std::vector<IGameObject*> minions, bool useH
 IPredictionOutput* GetLaneClearMinion(std::vector<IGameObject*> minions)
 {
     //minions = SortByHealth(minions);
-    for (const auto& t : minions)
+    for (auto& t : minions)
     {
         if (t == nullptr ||
             !t->IsValidTarget(Spells::Q->Range()) ||
@@ -307,7 +306,7 @@ IPredictionOutput* GetLaneClearMinion(std::vector<IGameObject*> minions)
 
 IPredictionOutput* GetJungleClearMinion()
 {
-    for (const auto& t : SortByMaxHealth(g_ObjectManager->GetJungleMobs()))
+    for (auto& t : SortByMaxHealth(g_ObjectManager->GetJungleMobs()))
     {
         if (t == nullptr || !t->IsValidTarget(Spells::Q->Range()))
             continue;
@@ -484,7 +483,7 @@ bool RAoE(int hits)
 
     for (const auto& target : targets)
     {
-        if (target == nullptr || !target->IsValidTarget(Menu::Combo::RRange->GetInt() + 150))
+        if (target == nullptr || !target->IsValidTarget(Menu::Combo::RRange->GetInt() + 150) || !IsKillable(target))
             continue;
 
         auto pred = GetRPred(target);
@@ -760,24 +759,9 @@ bool SemiManualR()
     return false;
 }
 
-void UpdateSkin()
-{
-    if (!Menu::Misc::SkinHack::Enabled->GetBool())
-        return;
-
-    if (SkinRefresh || g_LocalPlayer->GetSkinId() != Menu::Misc::SkinHack::SelectedSkin->GetInt())
-    {
-        SkinRefresh = false;
-        g_LocalPlayer->SetSkin(Menu::Misc::SkinHack::SelectedSkin->GetInt(), 
-            g_ChampionManager->GetDatabase().find(ChampionId::Ezreal)->second[Menu::Misc::SkinHack::SelectedSkin->GetInt()].Model);
-    }
-}
-
 bool IsStructure(IGameObject* target)
 {
-    auto type = target->Type();
-    return type == EntityType::AITurretClient || type == EntityType::BarracksDampener ||
-        type == EntityType::HQ;
+    return target->IsAITurret() || target->IsInhibitor() || target->IsNexus();
 }
 
 void OnGameUpdate()
@@ -790,56 +774,72 @@ void OnGameUpdate()
         if (Menu::Combo::RDistance->GetInt() + 100 >= Menu::Combo::RRange->GetInt())
             Menu::Combo::RRange->SetInt(Menu::Combo::RDistance->GetInt() + 100);
 
-        if (!Menu::Toggle->GetBool())
-            return;
-
-        if (g_LocalPlayer->IsDead())
+        if (!Menu::Toggle->GetBool() || g_LocalPlayer->IsDead())
         {
-            SkinRefresh = true;
             return;
         }
 
         // avoid useless code to run while casting stuff
         if (g_LocalPlayer->GetSpellbook()->IsCastingSpell() || g_LocalPlayer->GetSpellbook()->IsChanneling())
+        {
             return;
+        }
 
         HandleKS();
 
         if (SemiManualR())
+        {
             return;
+        }
 
         if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo))
+        {
             if (HandleCombo())
+            {
                 return;
+            }
+        }
 
         if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeHarass))
+        {
             if (HandleHarass())
+            {
                 return;
+            }
+        }
 
         if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeLaneClear))
         {
             if (HandleLaneClear() || HandleJungleClear())
+            {
                 return;
+            }
         }
 
         if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeFarm))
+        {
             if (HandleLasthit())
+            {
                 return;
+            }
+        }
 
         if (g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeMixed))
         {
             if (HandleLasthit() || HandleHarass())
+            {
                 return;
+            }
         }
 
         if (g_Orbwalker->GetOrbwalkingMode() == 0)
+        {
             StackTear();
-
-        UpdateSkin();
+        }
     }
     catch (const std::exception & e)
     {
-        g_Log->PrintToFile(e.what());
+        // ignore
     }
 }
 
@@ -852,9 +852,11 @@ void OnHudDraw()
         JSInstance->OnHudDraw();
 
         if (!Menu::Toggle->GetBool() || !Menu::Drawings::Toggle->GetBool())
+        {
             return;
+        }
 
-        auto PlayerPosition = g_LocalPlayer->Position();
+        const auto PlayerPosition = g_LocalPlayer->Position();
 
         if (Menu::Drawings::Q->GetBool())
             g_Drawing->AddCircle(PlayerPosition, Spells::Q->Range(), Menu::Colors::Q->GetColor(), CirclesWidth);
@@ -874,7 +876,7 @@ void OnHudDraw()
     }
     catch (const std::exception & e)
     {
-        g_Log->PrintToFile(e.what());
+        // ignore
     }
     //g_Drawing->AddTextOnScreen(Vector2(g_Renderer->ScreenWidth() * 0.0130208333333333f, g_Renderer->ScreenHeight() * 0.45f), Menu::Colors::Q->GetColor(), 16, ECase.c_str());
 }
@@ -886,43 +888,16 @@ void OnProcessSpellCast(IGameObject* sender, OnProcessSpellEventArgs* args)
 
     try
     {
-        if (sender->IsEnemy())
-        {
-            if (args->Target != nullptr && args->Target->IsMe() && (args->IsAutoAttack || args->SpellSlot != SpellSlot::Invalid))
-            {
-                if (Menu::Misc::UseHeal->GetBool() && IsKillable(g_LocalPlayer))
-                {
-                    auto incdmg = args->IsAutoAttack ? sender->AutoAttackDamage(g_LocalPlayer, true) : g_Common->GetSpellDamage(sender, g_LocalPlayer, args->SpellSlot, false);
-                    auto healthAfterDmg = ((g_LocalPlayer->RealHealth(true, true) - incdmg) / g_LocalPlayer->MaxHealth()) * 100.f;
-
-                    if (healthAfterDmg < Menu::Misc::HealPercent->GetInt())
-                    {
-                        if (sender->IsAIHero() || healthAfterDmg <= 0)
-                        {
-                            if (Spells::Heal != nullptr && Spells::Heal->IsReady())
-                            {
-                                g_Common->ChatPrint("USE HEAL");
-                                std::string inc = " HAD:" + std::to_string(healthAfterDmg);
-                                std::string incp = inc + " INCD: " + std::to_string(incdmg);
-                                std::string s = sender->BaseSkinName() + incp;
-                                g_Common->ChatPrint(s.c_str());
-                                Spells::Heal->Cast();
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         if (!sender->IsAITurret())
+        {
             return;
+        }
 
         TurretLastTarget[sender->NetworkId()] = args->Target;
     }
     catch (const std::exception & e)
     {
-        g_Log->PrintToFile(e.what());
+        // ignore
     }
 }
 
@@ -976,7 +951,9 @@ void OnBeforeAttackOrbwalker(BeforeAttackOrbwalkerArgs* args)
             if (IsStructure(args->Target))
             {
                 if (Menu::LaneClear::ManaLimit->GetInt() >= g_LocalPlayer->ManaPercent())
+                {
                     return;
+                }
 
                 if (Menu::LaneClear::WTurret->GetBool() && Spells::W->IsReady())
                 {
@@ -988,7 +965,9 @@ void OnBeforeAttackOrbwalker(BeforeAttackOrbwalkerArgs* args)
             if (args->Target->IsEpicMonster())
             {
                 if (Menu::JungleClear::ManaLimit->GetInt() >= g_LocalPlayer->ManaPercent())
+                {
                     return;
+                }
 
                 if (Menu::JungleClear::W->GetBool() && Spells::W->IsReady())
                 {
@@ -1000,7 +979,7 @@ void OnBeforeAttackOrbwalker(BeforeAttackOrbwalkerArgs* args)
     }
     catch (const std::exception& e)
     {
-        g_Log->PrintToFile(e.what());
+        // ignore
     }
 }
 
@@ -1021,10 +1000,11 @@ void OnAfterAttackOrbwalker(IGameObject* target)
                 }
             }
         }
+
     }
     catch (const std::exception & e)
     {
-        g_Log->PrintToFile(e.what());
+        // ignore
     }
 }
 
@@ -1039,7 +1019,7 @@ void OnTeleport(IGameObject* sender, OnTeleportEventArgs* args)
     }
     catch (const std::exception & e)
     {
-        g_Log->PrintToFile(e.what());
+        // ignore
     }
 }
 
@@ -1051,7 +1031,7 @@ void OnEndScene()
     }
     catch (const std::exception & e)
     {
-        g_Log->PrintToFile(e.what());
+        // ignore
     }
 }
 
@@ -1070,10 +1050,6 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
 
     Spells::R = g_Common->AddSpell(SpellSlot::R, 250000.f);
     Spells::R->SetSkillshot(1.f, 320.f, 2000.f, kCollidesWithYasuoWall, eSkillshotType::kSkillshotLine);
-
-    auto heal = g_LocalPlayer->GetSpellbook()->GetSpellSlotFromName("SummonerHeal");
-    if (heal != SpellSlot::Invalid)
-        Spells::Heal = g_Common->AddSpell(heal, 800.f);
 
     using namespace Menu;
     MenuInstance = g_Menu->CreateMenu("kEzreal", "kappa_ezreal");
@@ -1117,30 +1093,12 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
 
     const auto MiscMenu = MenuInstance->AddSubMenu("Misc", "misc");
 
-    const auto SkinMenu = MiscMenu->AddSubMenu("Skin Hack", "skin");
-    Misc::SkinHack::Enabled = SkinMenu->AddCheckBox("Enabled", "SkinHack", false);
-
-    std::vector<std::string> skins = std::vector<std::string>();
-    for (const auto& data : g_ChampionManager->GetDatabase())
-        if (data.first == ChampionId::Ezreal)
-        {
-            for (const auto& skin : data.second)
-                skins.push_back(skin.SkinName);
-            break;
-        }
-
-    Misc::SkinHack::SelectedSkin = SkinMenu->AddComboBox("Skin", "skin", skins, 21);
-
-    UpdateSkin();
-
     Misc::SemiManualR = MiscMenu->AddKeybind("Semi Manual R", "r", 0x53, false, _KeybindType::KeybindType_Hold);
     Misc::QKillSteal = MiscMenu->AddCheckBox("Q Kill Steal", "QKillSteal", true);
     Misc::QStack = MiscMenu->AddCheckBox("Stack Tear Q", "QStack", true);
     Misc::QInSpawn = MiscMenu->AddCheckBox("Stack Tear In Spawn", "QInSpawn", true);
     Misc::QAwayFromEnemy = MiscMenu->AddCheckBox("Stack Tear If No Enemies Are Near", "QAwayFromEnemy", true);
     Misc::StackManaLimit = MiscMenu->AddSlider("Stacking Mana Limit", "manalimit", 75, 0, 99);
-    Misc::UseHeal = MiscMenu->AddCheckBox("Use Summoner Heal", "UseHeal", true);
-    Misc::HealPercent = MiscMenu->AddSlider("Heal Under HP%", "HealPercent", 10, 0, 100);
     Misc::UseBotrk = MiscMenu->AddCheckBox("Use BOTRK/Cutlass/Gunblade", "botrk", true);
 
     const auto DrawingMenu = MenuInstance->AddSubMenu("Drawings", "draw");

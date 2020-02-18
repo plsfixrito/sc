@@ -18,6 +18,7 @@ public:
     float TravelTime = 0;
     int Id = 0;
     bool Shoot = false;
+    bool Skipped = false;
     Vector EndPosition;
     std::string BaseSkin;
 
@@ -38,6 +39,7 @@ public:
     std::shared_ptr<ISpell> R;
 
     std::vector<TrackedRecall*> TrackedRecalls = std::vector<TrackedRecall*>();
+    std::map<int, int> LastVision = std::map<int, int>();
 
     IMenuElement* Toggle = nullptr;
     IMenuElement* Enabled = nullptr;
@@ -66,7 +68,7 @@ public:
         const auto BUSubMenu = MenuInstance->AddSubMenu("Base Ult", "base_ult");
         Enabled = BUSubMenu->AddCheckBox("Enabled", "toggle", true);
 
-        DisableKey = BUSubMenu->AddKeybind("Force Disable", "disable", 0x32, false, _KeybindType::KeybindType_Hold);
+        DisableKey = BUSubMenu->AddKeybind("Force Disable", "disable", VK_SPACE, false, _KeybindType::KeybindType_Hold);
         Targets = BUSubMenu->AddSubMenu("Targets", "targets");
 
         for (auto& enemy : g_ObjectManager->GetChampions(false))
@@ -134,17 +136,28 @@ public:
 
     void OnUpdate()
     {
-        if (!IsEnabled() || !IsReady())
+        if (!IsEnabled())
             return;
+
+        for (auto& e : g_ObjectManager->GetChampions(false))
+        {
+            if (e->IsVisible())
+            {
+                if (LastVision.count(e->NetworkId()) == 0)
+                    LastVision.insert({ e->NetworkId(), g_Common->TickCount() });
+                else
+                    LastVision[e->NetworkId()] = g_Common->TickCount();
+            }
+        }
 
         for (auto& recall : TrackedRecalls)
         {
-            if (recall->Shoot)
+            if (recall->Shoot || recall->Skipped)
                 continue;
 
             recall->TravelTime = TravelTime(recall->EndPosition, R);
 
-            const auto Target = g_ObjectManager->GetEntityByNetworkID(recall->Id);
+            auto Target = g_ObjectManager->GetEntityByNetworkID(recall->Id);
             if (Target->IsVisible())
             {
                 recall->LastVisiable = g_Common->TickCount();
@@ -152,30 +165,36 @@ public:
                 recall->LastHealthReg = Target->BaseHPRegenRate();
 
                 recall->HealthPred = recall->LastHealth + (recall->LastHealthReg * (recall->TravelTime / 1000.f));
-                if (recall->HealthPred == 0)
-                    recall->HealthPred = recall->LastHealth;
-                /*
-                if (Target->MaxHealth() > 0 && healthAfterRecall > Target->MaxHealth())
-                    recall->HealthPred = Target->MaxHealth();
-                else
-                    recall->HealthPred = healthAfterRecall;*/
             }
             else
             {
-                recall->HealthPred = recall->LastHealth + (recall->LastHealthReg * ((recall->LastVisiable / 1000.f) + (recall->TravelTime / 1000.f)));
-                if (recall->HealthPred == 0)
-                    recall->HealthPred = recall->LastHealth;
-                /*
-                if (Target->MaxHealth() > 0 && healthAfterRecall > Target->MaxHealth())
-                    recall->HealthPred = Target->MaxHealth();
+                if (LastVision.count(recall->Id) > 0)
+                {
+                    recall->LastVisiable = LastVision[recall->Id];
+                    recall->HealthPred = recall->LastHealth + (recall->LastHealthReg * (((g_Common->TickCount() - recall->LastVisiable) / 1000.f) + (recall->TravelTime / 1000.f)));
+                }
                 else
-                    recall->HealthPred = healthAfterRecall;*/
+                {
+                    recall->HealthPred = recall->LastHealth + (recall->LastHealthReg * (recall->TravelTime / 1000.f));
+                }
             }
+
+            if (recall->HealthPred >= Target->MaxHealth())
+                recall->HealthPred = Target->MaxHealth();
+            else if (recall->HealthPred == 0)
+                recall->HealthPred = recall->LastHealth;
 
             if (CanUlt(recall))
             {
-                recall->Shoot = true;
-                R->FastCast(recall->EndPosition);
+                if (IsReady())
+                {
+                    recall->Shoot = true;
+                    R->FastCast(recall->EndPosition);
+                }
+                else
+                {
+                    recall->Skipped = true;
+                }
                 break;
             }
         }
@@ -214,7 +233,7 @@ public:
         g_Drawing->AddLineOnScreen(Vector2(x1, y1), Vector2(x2, y2), BackgroundColor->GetColor(), thickness);
     }
 
-    //const float width = g_Renderer->ScreenWidth() * 0.25f;
+    //float width = g_Renderer->ScreenWidth() * 0.25f;
     const float height = g_Renderer->ScreenHeight() * 0.01f;
     const Vector2 center = Vector2(g_Renderer->ScreenWidth() / 2, g_Renderer->ScreenHeight() / 2);
     
@@ -232,7 +251,7 @@ public:
 
         auto end = Vector2(center.x, start.y);
         end.x = end.x + (end.x * RecallWidth->GetFloat());
-        const auto width = end.x - start.x;
+        auto width = end.x - start.x;
 
         DrawRect(start, end, height, 1);
 
@@ -240,8 +259,8 @@ public:
         auto i = 0;
         for (auto& recall : TrackedRecalls)
         {
-            const auto progress = (recall->RecallEnd - g_Common->TickCount()) / recall->Duration;
-            const auto endx = pos.x + (width * progress);
+            auto progress = (recall->RecallEnd - g_Common->TickCount()) / recall->Duration;
+            auto endx = pos.x + (width * progress);
 
             if (recall->Shoot)
             {

@@ -1,0 +1,128 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Misc">
+      <UniqueIdentifier>{b274ac16-8ddd-469e-b05f-6dd9f9b3b723}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Summoners">
+      <UniqueIdentifier>{f117711a-d360-4db8-b370-4cfa82999dda}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Helpers">
+      <UniqueIdentifier>{d076c7f2-a0e6-487e-8ecb-11468a0c7652}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SDK">
+      <UniqueIdentifier>{7dd78977-39bf-486e-b4ec-c4db7db262c9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Tracker">
+      <UniqueIdentifier>{4a08f6e0-0673-476d-b2eb-9d5ec15f886d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Tracker\Ganks">
+      <UniqueIdentifier>{b2f03083-9ffd-402d-9ae1-306c96b74a66}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Tracker\Placements">
+      <UniqueIdentifier>{572de10d-4ac9-490a-907c-cd886fadda47}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Items">
+      <UniqueIdentifier>{1ba1c638-e3bf-4b10-8a81-560d1d5c106d}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="Summs.h">
+      <Filter>Summoners</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SDK\clipper.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SDK\PluginSDK.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SDK\Vector.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="Extentions.cpp">
+      <Filter>Helpers</Filter>
+    </ClCompile>
+    <ClCompile Include="SkinHack.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="Heal.cpp">
+      <Filter>Summoners</Filter>
+    </ClCompile>
+    <ClCompile Include="Summs.cpp">
+      <Filter>Summoners</Filter>
+    </ClCompile>
+    <ClCompile Include="TurretRange.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="Items.cpp">
+      <Filter>Items</Filter>
+    </ClCompile>
+    <ClCompile Include="Barrier.cpp">
+      <Filter>Summoners</Filter>
+    </ClCompile>
+    <ClCompile Include="GankAlert.cpp">
+      <Filter>Tracker\Ganks</Filter>
+    </ClCompile>
+    <ClCompile Include="Tracker.cpp">
+      <Filter>Tracker</Filter>
+    </ClCompile>
+    <ClCompile Include="Flash.cpp">
+      <Filter>Summoners</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="SkinHack.h">
+      <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="Heal.h">
+      <Filter>Summoners</Filter>
+    </ClInclude>
+    <ClInclude Include="Extentions.h">
+      <Filter>Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SDK\clipper.hpp">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SDK\EventArgs.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SDK\EventHandler.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SDK\Geometry.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SDK\PluginSDK.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SDK\PluginSDK_Enums.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SDK\Vector.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="TurretRange.h">
+      <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="GankAlert.h">
+      <Filter>Tracker\Ganks</Filter>
+    </ClInclude>
+    <ClInclude Include="Items.h">
+      <Filter>Items</Filter>
+    </ClInclude>
+    <ClInclude Include="Barrier.h">
+      <Filter>Summoners</Filter>
+    </ClInclude>
+    <ClInclude Include="Tracker.h">
+      <Filter>Tracker</Filter>
+    </ClInclude>
+    <ClInclude Include="Flash.h">
+      <Filter>Summoners</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

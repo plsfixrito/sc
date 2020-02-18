@@ -9,6 +9,7 @@ class TrackedMob
 public:
     float DamageOnMob = 0;
     float DPS = 0;
+    float AvgDPS = 0;
     float LastHealth = 0;
     float HealthPred = 0;
     float TravelTime = 0;
@@ -28,6 +29,8 @@ public:
 
     IMenuElement* Toggle = nullptr;
     IMenuElement* Enabled = nullptr;
+    IMenuElement* DisableKey = nullptr;
+
     IMenuElement* StealBaron = nullptr;
     IMenuElement* StealDragon = nullptr;
     IMenuElement* StealRed = nullptr;
@@ -45,6 +48,7 @@ public:
 
         const auto JSSubMenu = MenuInstance->AddSubMenu("Jungle Steal", "jungle_steal");
         Enabled = JSSubMenu->AddCheckBox("Enabled", "toggle", true);
+        DisableKey = JSSubMenu->AddKeybind("Force Disable", "disable", VK_SPACE, false, _KeybindType::KeybindType_Hold);
 
         const auto TargetsMenu = JSSubMenu->AddSubMenu("Targets", "js_targets");
         StealBaron = TargetsMenu->AddCheckBox("Steal Baron", "StealBaron", true);
@@ -61,7 +65,7 @@ public:
     
     bool IsEnabled()
     {
-        return Toggle->GetBool() && Enabled->GetBool();
+        return Toggle->GetBool() && Enabled->GetBool() && !DisableKey->GetBool();
     }
 
     bool IsReady()
@@ -153,6 +157,15 @@ public:
 
                 auto secondsPassed = max(1.f, (g_Common->TickCount() - trackedMob->LastCheck) / 1000.f);
                 trackedMob->DPS = (trackedMob->LastHealth - mob->Health()) / secondsPassed;
+                if (trackedMob->DPS > 0)
+                {
+                    if (trackedMob->AvgDPS == 0)
+                        trackedMob->AvgDPS += trackedMob->DPS;
+                    else {
+                        trackedMob->AvgDPS += trackedMob->DPS;
+                        trackedMob->AvgDPS /= 2;
+                    }
+                }
                 trackedMob->LastHealth = mob->Health();
                 trackedMob->LastCheck = g_Common->TickCount();
                 trackedMob->DamageOnMob = R->Damage(mob);
@@ -172,9 +185,9 @@ public:
             // TODO IMPROVE THIS WTF
             if (trackedMob->DamageOnMob >= trackedMob->HealthPred && trackedMob->HealthPred - trackedMob->DamageOnMob > -trackedMob->DamageOnMob)
             {
-                const auto vision = !mob->IsVisible() && !NoVision->GetBool();
-                const auto allies = NoAlly->GetBool() && CountAllies(mob) > 0 && CountEnemies(mob) == 0;
-                const auto distance = g_LocalPlayer->Position().Distance(mob->Position()) < 1500.f;
+                auto vision = !mob->IsVisible() && !NoVision->GetBool();
+                auto allies = NoAlly->GetBool() && CountAllies(mob) > 0 && CountEnemies(mob) == 0;
+                auto distance = g_LocalPlayer->Position().Distance(mob->Position()) < 1500.f;
                 if (vision || allies || distance)
                 {
                     trackedMob->Status = vision ? "No Vision" : allies ? "Allies Near" : "In Range";

@@ -12,7 +12,6 @@ public:
     float LastHealth = 0;
     float LastHealthReg = 0;
     float HealthPred = 0;
-    float RecallStart = 0;
     float RecallEnd = 0;
     float Duration = 0;
     float TravelTime = 0;
@@ -28,10 +27,9 @@ public:
     }
     bool Ended()
     {
-        return g_Common->TickCount() > RecallEnd;
+        return g_Common->TickCount() >= RecallEnd;
     }
 };
-
 
 class BaseUlt
 {
@@ -71,8 +69,8 @@ public:
         DisableKey = BUSubMenu->AddKeybind("Force Disable", "disable", VK_SPACE, false, _KeybindType::KeybindType_Hold);
         Targets = BUSubMenu->AddSubMenu("Targets", "targets");
 
-        for (auto& enemy : g_ObjectManager->GetChampions(false))
-            Targets->AddCheckBox(enemy->BaseSkinName(), enemy->BaseSkinName(), true)->SetBool(true);
+        for (const auto& enemy : g_ObjectManager->GetChampions(false))
+            Targets->AddCheckBox(enemy->ChampionName(), enemy->ChampionName(), true)->SetBool(true);
 
         IncludePing = BUSubMenu->AddCheckBox("Include Ping In Calculations", "IncludePing", true);
 
@@ -114,8 +112,8 @@ public:
         if (recall->Health() >= recall->Damage)
             return false;
 
-        auto ticksLeft = recall->RecallEnd - g_Common->TickCount();
-        return recall->Duration > recall->TravelTime && ticksLeft > recall->TravelTime;
+        //auto ticksLeft = recall->RecallEnd - g_Common->TickCount();
+        return recall->Duration > recall->TravelTime && (recall->RecallEnd - g_Common->TickCount()) > recall->TravelTime;
     }
 
     bool CanUlt(TrackedRecall* recall)
@@ -127,11 +125,17 @@ public:
         if (recall->Health() >= recall->Damage)
             return false;
 
-        auto ticksLeft = recall->RecallEnd - g_Common->TickCount();
         recall->TravelTime = TravelTime(recall->EndPosition, R);
-        auto castOffset = 50 + g_Common->Ping();
-        auto mod = ticksLeft - recall->TravelTime;
-        return Targets->GetElement(recall->BaseSkin)->GetBool() && castOffset >= mod && recall->Duration > recall->TravelTime;//&& ticksLeft > recall->TravelTime;
+
+        if (recall->TravelTime > recall->Duration)
+            return false;
+
+        //auto ticksLeft = recall->RecallEnd - g_Common->TickCount();
+        //auto castOffset = 50 + g_Common->Ping()/2;
+        //auto mod = ticksLeft - recall->TravelTime;
+
+        return Targets->GetElement(recall->BaseSkin)->GetBool() && recall->TravelTime >= (recall->RecallEnd - g_Common->TickCount());
+            //&& castOffset >= mod && recall->Duration > recall->TravelTime;//&& ticksLeft > recall->TravelTime;
     }
 
     void OnUpdate()
@@ -139,7 +143,7 @@ public:
         if (!IsEnabled())
             return;
 
-        for (auto& e : g_ObjectManager->GetChampions(false))
+        for (const auto& e : g_ObjectManager->GetChampions(false))
         {
             if (e->IsVisible())
             {
@@ -150,6 +154,13 @@ public:
             }
         }
 
+        if (TrackedRecalls.empty())
+        {
+            TrackedRecalls.clear();
+            TrackedRecalls.shrink_to_fit();
+            return;
+        }
+
         for (auto& recall : TrackedRecalls)
         {
             if (recall->Shoot || recall->Skipped)
@@ -157,12 +168,12 @@ public:
 
             recall->TravelTime = TravelTime(recall->EndPosition, R);
 
-            auto Target = g_ObjectManager->GetEntityByNetworkID(recall->Id);
+            const auto Target = g_ObjectManager->GetEntityByNetworkID(recall->Id);
             if (Target->IsVisible())
             {
                 recall->LastVisiable = g_Common->TickCount();
                 recall->LastHealth = Target->RealHealth(false, false);
-                recall->LastHealthReg = Target->BaseHPRegenRate();
+                recall->LastHealthReg = Target->HPRegenRate();
 
                 recall->HealthPred = recall->LastHealth + (recall->LastHealthReg * (recall->TravelTime / 1000.f));
             }
@@ -242,7 +253,7 @@ public:
         if (!IsEnabled() || !DrawRecalls->GetBool())
             return;
 
-        if (TrackedRecalls.size() == 0)
+        if (TrackedRecalls.empty())
             return;
 
         auto start = Vector2(center.x, center.y);
@@ -257,10 +268,10 @@ public:
 
         auto pos = Vector2(start.x , end.y);
         auto i = 0;
-        for (auto& recall : TrackedRecalls)
+        for (const auto& recall : TrackedRecalls)
         {
-            auto progress = (recall->RecallEnd - g_Common->TickCount()) / recall->Duration;
-            auto endx = pos.x + (width * progress);
+            const auto progress = (recall->RecallEnd - g_Common->TickCount()) / recall->Duration;
+            const auto endx = pos.x + (width * progress);
 
             if (recall->Shoot)
             {
@@ -270,7 +281,7 @@ public:
             else if (IsPossible(recall))
             {
                 DrawRectProg(pos, Vector2(endx, pos.y), CantUltColor->GetColor(), height, 1);
-                auto at = recall->TravelTime / recall->Duration;
+                const auto at = recall->TravelTime / recall->Duration;
                 DrawRectProg(pos, Vector2(pos.x + (width * at), pos.y), CanUltColor->GetColor(), height, 1);
             }
             else
@@ -279,57 +290,44 @@ public:
             }
 
             i++;
-            std::string s = recall->BaseSkin + " (" + std::to_string((int)recall->LastHealth) + " | " + std::to_string((int)recall->HealthPred) + ")";
+            const std::string s = recall->BaseSkin + " (" + std::to_string((int)recall->LastHealth) + " | " + std::to_string((int)recall->HealthPred) + ")";
             g_Drawing->AddTextOnScreen(Vector2(endx + 10, pos.y - ((height * 2.f) * i)), BackgroundColor->GetColor(), 16, s.c_str());
         }
     }
 
     void OnTeleport(IGameObject* sender, OnTeleportEventArgs* args)
     {
-        if (sender == nullptr || !sender->IsEnemy() 
-            || !sender->IsAIHero())
+        if (sender == nullptr || !sender->IsEnemy() || !sender->IsAIHero())
             return;
 
         if (args->Type == OnTeleportEventArgs::TeleportType::Recall && args->Status == OnTeleportEventArgs::TeleportStatus::Start)
         {
-            // pls fix from core
-            /*auto spawns = g_ObjectManager->GetByType(EntityType::obj_SpawnPoint);
-            spawns.erase(std::remove_if(spawns.begin(), spawns.end(),
-                [&sender](IGameObject* t) -> bool
+            TrackedRecalls.erase(std::remove_if(TrackedRecalls.begin(), TrackedRecalls.end(),
+                [&sender](TrackedRecall* recall) -> bool
                 {
-                    return t == nullptr || t->Team() != sender->Team();
-                }), spawns.end());
-            
-            if (spawns.size() <= 0)
-            {
-                g_Common->ChatPrint("no spawn found");
-                return;
-            }
-
-            auto spawn = spawns[0];
-            if (spawn != nullptr)*/
-            {
-                TrackedRecalls.erase(std::remove_if(TrackedRecalls.begin(), TrackedRecalls.end(),
-                    [&sender](TrackedRecall* recall) -> bool
+                    if (recall->Ended() || recall->Id == sender->NetworkId())
                     {
-                        return recall->Ended() || recall->Id == sender->NetworkId();
-                    }), TrackedRecalls.end());
+                        delete recall;
+                        return true;
+                    }
 
-                auto tr = new TrackedRecall();
-                tr->BaseSkin = sender->BaseSkinName();
-                tr->Damage = R->Damage(sender);
-                tr->LastHealth = sender->RealHealth(false, false);
-                tr->LastHealthReg = sender->BaseHPRegenRate();
-                tr->RecallStart = g_Common->TickCount();
-                tr->Duration = args->Duration;
-                tr->RecallEnd = tr->RecallStart + tr->Duration;
-                tr->EndPosition = sender->Team() == GameObjectTeam::Order ? BlueSpawn : RedSpawn;
-                tr->Id = sender->NetworkId();
-                tr->TravelTime = TravelTime(tr->EndPosition, R);
-                tr->HealthPred = tr->LastHealth + (tr->LastHealthReg * (tr->TravelTime / 1000.f));
+                    return false;
+                }), TrackedRecalls.end());
 
-                TrackedRecalls.push_back(tr);
-            }
+            auto tr = new TrackedRecall();
+            tr->BaseSkin = sender->ChampionName();
+            tr->Damage = R->Damage(sender);
+            tr->LastHealth = sender->RealHealth(false, false);
+            tr->LastHealthReg = sender->HPRegenRate();
+            tr->Duration = args->Duration;
+            tr->RecallEnd = g_Common->TickCount() + tr->Duration;
+            tr->EndPosition = sender->Team() == GameObjectTeam::Order ? BlueSpawn : RedSpawn;
+            tr->Id = sender->NetworkId();
+            tr->TravelTime = TravelTime(tr->EndPosition, R);
+            tr->HealthPred = tr->LastHealth + (tr->LastHealthReg * (tr->TravelTime / 1000.f));
+            tr->Skipped = tr->TravelTime > tr->Duration;
+
+            TrackedRecalls.push_back(tr);
         }
         else if (args->Status == OnTeleportEventArgs::TeleportStatus::Finish || 
                 args->Status == OnTeleportEventArgs::TeleportStatus::Abort)
@@ -337,8 +335,31 @@ public:
             TrackedRecalls.erase(std::remove_if(TrackedRecalls.begin(), TrackedRecalls.end(),
                 [&sender](TrackedRecall* recall) -> bool
                 {
-                    return recall->Ended() || recall->Id == sender->NetworkId();
+                    if (recall->Ended() || recall->Id == sender->NetworkId())
+                    {
+                        delete recall;
+                        return true;
+                    }
+
+                    return false;
                 }), TrackedRecalls.end());
+        }
+    }
+
+    void Unload()
+    {
+        if (!TrackedRecalls.empty())
+        {
+            for (auto& x : TrackedRecalls)
+                delete x;
+
+            TrackedRecalls.clear();
+            TrackedRecalls.shrink_to_fit();
+        }
+
+        if (!LastVision.empty())
+        {
+            LastVision.clear();
         }
     }
 };

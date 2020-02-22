@@ -45,5 +45,6 @@
     </ClInclude>
     <ClInclude Include="JungleSteal.h" />
     <ClInclude Include="BaseUlt.h" />
+    <ClInclude Include="VersionChecker.h" />
   </ItemGroup>
 </Project>

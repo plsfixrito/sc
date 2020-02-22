@@ -20,9 +20,9 @@ namespace SkinHack
 
         if (SkinRefresh || g_LocalPlayer->GetSkinId() != SelectedSkin->GetInt())
         {
+            const auto select = SelectedSkin->GetInt();
             SkinRefresh = false;
-            g_LocalPlayer->SetSkin(SelectedSkin->GetInt(),
-                g_ChampionManager->GetDatabase().find(g_LocalPlayer->ChampionId())->second[SelectedSkin->GetInt()].Model);
+            g_LocalPlayer->SetSkin(select, g_ChampionManager->GetDatabase().find(g_LocalPlayer->ChampionId())->second[select].Model);
         }
     }
 

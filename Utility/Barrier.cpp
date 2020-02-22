@@ -36,23 +36,18 @@ namespace Barrier
             {
                 incdmg = args->IsAutoAttack ? sender->AutoAttackDamage(args->Target, true) : g_Common->GetSpellDamage(sender, args->Target, args->SpellSlot, false);
             }
-
-            const auto hp = UseHP->GetBool() ? g_HealthPrediction->GetHealthPrediction(args->Target, 100 + g_Common->Ping()) : args->Target->RealHealth(true, true);
-
-            const auto healthAfterDmg = ((hp - incdmg) / args->Target->MaxHealth()) * 100.f;
+            
+            const auto hp = UseHP->GetBool() ? g_HealthPrediction->GetHealthPrediction(args->Target, 100 + g_Common->Ping()) : args->Target->Health();
+            const auto hpAfterDmg = hp - incdmg;
+            const auto healthAfterDmg = (hpAfterDmg / args->Target->MaxHealth()) * 100.f;
 
             if (healthAfterDmg < BarrierPercent->GetInt())
             {
-                if (sender->IsAIHero() || healthAfterDmg <= 0)
+                if (sender->IsAIHero() || hpAfterDmg <= 0)
                 {
                     std::string xd = "USE Barrier";
                     g_Common->ChatPrint(xd.c_str());
-                    /*
-                    std::string inc = " HAD:" + std::to_string(healthAfterDmg);
-                    std::string incp = inc + " INCD: " + std::to_string(incdmg);
-                    std::string s = sender->BaseSkinName() + incp;
-                    g_Common->ChatPrint(s.c_str());
-                    */
+
                     Barrier->Cast();
                 }
             }

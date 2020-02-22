@@ -29,12 +29,16 @@
       <DeploymentContent>false</DeploymentContent>
     </ClCompile>
     <ClCompile Include="Barrier.cpp" />
+    <ClCompile Include="PlayerRange.cpp" />
     <ClCompile Include="Extentions.cpp" />
     <ClCompile Include="Flash.cpp" />
     <ClCompile Include="GankAlert.cpp" />
     <ClCompile Include="Heal.cpp" />
     <ClCompile Include="Items.cpp" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="Misc.cpp" />
+    <ClCompile Include="Orbfix.cpp" />
+    <ClCompile Include="Placements.cpp" />
     <ClCompile Include="SkinHack.cpp" />
     <ClCompile Include="Summs.cpp" />
     <ClCompile Include="Summs.h" />
@@ -64,11 +68,15 @@
       <DeploymentContent>false</DeploymentContent>
     </ClInclude>
     <ClInclude Include="Barrier.h" />
+    <ClInclude Include="PlayerRange.h" />
     <ClInclude Include="Extentions.h" />
     <ClInclude Include="Flash.h" />
     <ClInclude Include="GankAlert.h" />
     <ClInclude Include="Heal.h" />
     <ClInclude Include="Items.h" />
+    <ClInclude Include="Misc.h" />
+    <ClInclude Include="Orbfix.h" />
+    <ClInclude Include="Placements.h" />
     <ClInclude Include="SkinHack.h" />
     <ClInclude Include="Tracker.h" />
     <ClInclude Include="TurretRange.h" />
@@ -151,6 +159,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalIncludeDirectories>$(DXSDK_DIR)Include;$(IncludePath);</AdditionalIncludeDirectories>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

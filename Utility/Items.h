@@ -7,6 +7,12 @@ namespace Items
 {
 	void OnBeforeAttackOrbwalker(BeforeAttackOrbwalkerArgs* args);
 
+	void UseItem(ItemId itemId);
+
+	void OnBuff(IGameObject* sender, OnBuffEventArgs* args);
+
+	void GameUpdate();
+
 	void Load(IMenu* mainMenu, IMenuElement* toggle);
 
 	void Unload();

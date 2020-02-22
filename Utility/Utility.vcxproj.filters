@@ -74,6 +74,18 @@
     <ClCompile Include="Flash.cpp">
       <Filter>Summoners</Filter>
     </ClCompile>
+    <ClCompile Include="Placements.cpp">
+      <Filter>Tracker\Placements</Filter>
+    </ClCompile>
+    <ClCompile Include="Misc.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="Orbfix.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="PlayerRange.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="SkinHack.h">
@@ -123,6 +135,18 @@
     </ClInclude>
     <ClInclude Include="Flash.h">
       <Filter>Summoners</Filter>
+    </ClInclude>
+    <ClInclude Include="Placements.h">
+      <Filter>Tracker\Placements</Filter>
+    </ClInclude>
+    <ClInclude Include="Misc.h">
+      <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="Orbfix.h">
+      <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="PlayerRange.h">
+      <Filter>Misc</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

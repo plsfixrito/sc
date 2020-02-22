@@ -1,5 +1,6 @@
 #include "Tracker.h"
 #include "GankAlert.h"
+#include "Placements.h"
 
 namespace Tracker
 {
@@ -7,11 +8,13 @@ namespace Tracker
 	{
 		const auto menu = mainMenu->AddSubMenu("Tracker", "tracker");
 
-		GankAlert::Load(menu, toggle);
+		//GankAlert::Load(menu, toggle);
+		Placements::Load(menu, toggle);
 	}
 
 	void Unload()
 	{
-		GankAlert::Unload();
+		//GankAlert::Unload();
+		Placements::Unload();
 	}
 }

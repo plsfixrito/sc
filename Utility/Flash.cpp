@@ -20,10 +20,9 @@ namespace Flash
 
 		auto castAgain = false;
 		auto endPos = args->CastPointEnd;
-		auto startPos = g_LocalPlayer->Position();
 		if (ExtendFlash->GetBool())
 		{
-			if (startPos.Distance(endPos) < 450)
+			if (g_LocalPlayer->Position().Distance(endPos) < 450)
 			{
 				g_Log->Print("kUtility: Extend Flash");
 				endPos = g_LocalPlayer->Position().Extend(endPos, 450);

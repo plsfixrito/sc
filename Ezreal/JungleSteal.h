@@ -35,6 +35,7 @@ public:
     IMenuElement* StealDragon = nullptr;
     IMenuElement* StealRed = nullptr;
     IMenuElement* StealBlue = nullptr;
+    IMenuElement* StealMode = nullptr;
     IMenuElement* NoAlly = nullptr;
     IMenuElement* NoVision = nullptr;
     IMenuElement* IncludePing = nullptr;
@@ -56,6 +57,7 @@ public:
         StealRed = TargetsMenu->AddCheckBox("Steal Red", "StealRed", true);
         StealBlue = TargetsMenu->AddCheckBox("Steal Blue", "StealBlue", true);
 
+        StealMode = JSSubMenu->AddComboBox("Mode", "stealmode", { "Fast", "Accurate (Slow)" }, 0);
         NoAlly = JSSubMenu->AddCheckBox("Dont Steal If Allies Are Near", "NoAlly", true);
         NoVision = JSSubMenu->AddCheckBox("Try To Steal With No Vision", "NoVision", true);
         IncludePing = JSSubMenu->AddCheckBox("Include Ping In Calculations", "IncludePing", true);
@@ -155,7 +157,7 @@ public:
                     return false;
                 }
 
-                auto secondsPassed = max(1.f, (g_Common->TickCount() - trackedMob->LastCheck) / 1000.f);
+                const auto secondsPassed = max(1.f, (g_Common->TickCount() - trackedMob->LastCheck) / 1000.f);
                 trackedMob->DPS = (trackedMob->LastHealth - mob->Health()) / secondsPassed;
                 if (trackedMob->DPS > 0)
                 {
@@ -165,6 +167,9 @@ public:
                         trackedMob->AvgDPS += trackedMob->DPS;
                         trackedMob->AvgDPS /= 2;
                     }
+                }
+                else {
+                    trackedMob->AvgDPS = 0;
                 }
                 trackedMob->LastHealth = mob->Health();
                 trackedMob->LastCheck = g_Common->TickCount();
@@ -178,16 +183,17 @@ public:
                 return false;
 
             trackedMob->TravelTime = TravelTime(mob, R);
-            auto invsTime = mob->IsVisible() ? 0.f : (g_Common->TickCount() - trackedMob->LastCheck) / 1000.f;
+            const auto invsTime = mob->IsVisible() ? 0.f : (g_Common->TickCount() - trackedMob->LastCheck) / 1000.f;
 
-            trackedMob->HealthPred = (!mob->IsVisible() ? trackedMob->LastHealth : mob->Health()) - (trackedMob->DPS * invsTime) - (trackedMob->DPS * (trackedMob->TravelTime / 1000.f));
+            const auto dps = trackedMob->DPS;//trackedMob->AvgDPS > 0 ? trackedMob->AvgDPS : trackedMob->DPS;
+            trackedMob->HealthPred = (!mob->IsVisible() ? trackedMob->LastHealth : mob->Health()) - (dps * invsTime) - (dps * (trackedMob->TravelTime / 1000.f));
 
             // TODO IMPROVE THIS WTF
-            if (trackedMob->DamageOnMob >= trackedMob->HealthPred && trackedMob->HealthPred - trackedMob->DamageOnMob > -trackedMob->DamageOnMob)
+            if (trackedMob->DamageOnMob >= trackedMob->HealthPred && trackedMob->HealthPred - trackedMob->DamageOnMob > (StealMode == 0 ? -trackedMob->DamageOnMob : 0))
             {
-                auto vision = !mob->IsVisible() && !NoVision->GetBool();
-                auto allies = NoAlly->GetBool() && CountAllies(mob) > 0 && CountEnemies(mob) == 0;
-                auto distance = g_LocalPlayer->Position().Distance(mob->Position()) < 1500.f;
+                const auto vision = !mob->IsVisible() && !NoVision->GetBool();
+                const auto allies = NoAlly->GetBool() && CountAllies(mob) > 0 && CountEnemies(mob) == 0;
+                const auto distance = g_LocalPlayer->Position().Distance(mob->Position()) < 1250.f;
                 if (vision || allies || distance)
                 {
                     trackedMob->Status = vision ? "No Vision" : allies ? "Allies Near" : "In Range";
@@ -216,19 +222,27 @@ public:
 
         bool skipdrag = false;
         bool skipbaron = false;
-        if (TrackedMobs.size() > 0)
+        if (!TrackedMobs.empty())
         {
             for (auto it = TrackedMobs.begin(); it != TrackedMobs.end();)
             {
-                auto mob = g_ObjectManager->GetEntityByNetworkID(it->first);
-                (mob == nullptr || !mob->IsValid() || mob->IsDead()) ? TrackedMobs.erase(it++) : (++it);
+                const auto mob = g_ObjectManager->GetEntityByNetworkID(it->first);
+                if (mob == nullptr || !mob->IsValid() || mob->IsDead())
+                {
+                    delete it->second;
+                    TrackedMobs.erase(it++);
+                }
+                else
+                {
+                    (++it);
+                }
             }
 
             for (auto& tracked : TrackedMobs)
             {
                 if (tracked.first != 0)
                 {
-                    auto mob = g_ObjectManager->GetEntityByNetworkID(tracked.first);
+                    const auto mob = g_ObjectManager->GetEntityByNetworkID(tracked.first);
 
                     if (IsBaron(mob))
                         skipbaron = true;
@@ -245,17 +259,14 @@ public:
                 }
             }
         }
-        
 
-        auto jungleMobs = g_ObjectManager->GetJungleMobs();
-        for (auto& mob : jungleMobs)
+        for (const auto& mob : g_ObjectManager->GetJungleMobs())
         {
             if (((!skipdrag && IsDragon(mob) && StealDragon->GetBool()) ||
                 (!skipbaron && IsBaron(mob) && StealBaron->GetBool()) || 
                 MobEnabled(mob)) &&
                 UpdateMob(mob) && IsReady() && IsEnabled()) 
             {
-
                 R->FastCast(mob->ServerPosition());
                 break;
             }
@@ -270,7 +281,7 @@ public:
             return;
 
         std::string s = "";
-        for (auto& tracked : TrackedMobs)
+        for (const auto& tracked : TrackedMobs)
         {
             s += tracked.second->BaseSkin + " HPred: " + std::to_string((int)tracked.second->HealthPred) + " | " + std::to_string((int)tracked.second->DamageOnMob) +
                 "\n- Status: " + tracked.second->Status + "\n";
@@ -278,5 +289,13 @@ public:
 
         if (s != "")
             g_Drawing->AddTextOnScreen(DrawPos, TextColor->GetColor(), 16, s.c_str());
+    }
+
+    void Unload()
+    {
+        if (!TrackedMobs.empty())
+        {
+            TrackedMobs.clear();
+        }
     }
 };

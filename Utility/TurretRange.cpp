@@ -23,13 +23,12 @@ namespace TurretRange
 
 	void OnHudDraw()
 	{
-		const auto range = 725.f + (g_LocalPlayer->BoundingRadius() * 2);
-		for (auto& turret : g_ObjectManager->GetTurrets())
+		for (auto const& turret : g_ObjectManager->GetTurrets())
 		{
 			if (!turret->IsValid() || turret->IsDead() || !turret->IsVisibleOnScreen())
 				continue;
 
-			DrawRange(turret, turret->IsEnemy(), range);
+			DrawRange(turret, turret->IsEnemy(), 750.f + turret->BoundingRadius());
 		}
 	}
 

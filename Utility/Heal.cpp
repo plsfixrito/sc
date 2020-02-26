@@ -14,6 +14,9 @@ namespace Heal
 
     void OnProcessSpellCast(IGameObject* sender, OnProcessSpellEventArgs* args)
     {
+        if (g_LocalPlayer->IsDead())
+            return;
+
         if (sender == nullptr || !sender->IsEnemy() || args->Target == nullptr || !args->Target->IsAlly() || !args->Target->IsAIHero())
             return;
 
@@ -44,7 +47,7 @@ namespace Heal
                 incdmg = args->IsAutoAttack ? sender->AutoAttackDamage(args->Target, true) : g_Common->GetSpellDamage(sender, args->Target, args->SpellSlot, false);
             }
 
-            const auto hp = UseHP->GetBool() ? g_HealthPrediction->GetHealthPrediction(args->Target, 100 + g_Common->Ping()) : args->Target->Health();
+            const auto hp = UseHP->GetBool() ? g_HealthPrediction->GetHealthPrediction(args->Target, (100 + g_Common->Ping()) / 1000) : args->Target->Health();
             const auto hpAfterDmg = hp - incdmg;
             const auto healthAfterDmg = (hpAfterDmg / args->Target->MaxHealth()) * 100.f;
 

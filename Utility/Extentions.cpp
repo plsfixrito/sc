@@ -5,19 +5,36 @@ namespace Extentions
     // TODO add Sviri W and other spell shields
     bool IsKillable(IGameObject* target)
     {
-        const auto kindred = target->HasBuff("kindredrnodeathbuff") && target->HealthPercent() < 15.f;
+		if (target->IsZombie() || target->IsUnkillable())
+			return false;
 
-        return !kindred && !target->HasBuff("UndyingRage") &&
-            !target->HasBuff("ChronoShift") && !target->HasBuff("bansheesveil") &&
-            !target->IsZombie() && !target->HasBuffOfType(BuffType::Invulnerability) &&
-            !target->HasBuffOfType(BuffType::SpellShield) && !target->HasBuffOfType(BuffType::Counter) &&
-            !target->HasBuffOfType(BuffType::PhysicalImmunity) && !target->HasBuffOfType(BuffType::SpellImmunity);
+		for (const auto& buff : target->GetBuffList())
+		{
+			if (StringEquals(buff.Name.c_str(), "kindredrnodeathbuff", true) && target->HealthPercent() < 15.f)
+				return false;
+
+			if (StringEquals(buff.Name.c_str(), "UndyingRage", true) ||
+				StringEquals(buff.Name.c_str(), "ChronoShift", true) ||
+				StringEquals(buff.Name.c_str(), "bansheesveil", true) ||
+				StringEquals(buff.Name.c_str(), "KayleR", true) ||
+				StringEquals(buff.Name.c_str(), "itemmagekillerevil", true))
+				return false;
+
+			if (buff.Type == BuffType::Invulnerability ||
+				//buff.Type == BuffType::SpellShield ||
+				buff.Type == BuffType::Counter ||
+				buff.Type == BuffType::PhysicalImmunity ||
+				buff.Type == BuffType::SpellImmunity)
+				return false;
+		}
+
+		return true;
     }
 
 	float GetAutoAttackRange(IGameObject* source, IGameObject* target)
 	{
 		auto result = source->AttackRange() + source->BoundingRadius() +
-			(target != nullptr ? (target->BoundingRadius() - 15) : 0);
+			(target != nullptr ? target->BoundingRadius() - 5 : 0);
 
 		if (source->IsAIHero() && target != nullptr && source->Team() != target->Team())
 		{
@@ -56,6 +73,31 @@ namespace Extentions
 		const auto inrange2 = IsInRange(source->ServerPosition(), target->ServerPosition(), aarange);
 
 		return inrange1 && inrange2;
+	}
+
+	bool OnScreen(Vector2 pos)
+	{
+		if (pos.x <= 0 || pos.y <= 0)
+			return false;
+
+		if (pos.x > g_Renderer->ScreenWidth() || pos.y > g_Renderer->ScreenHeight())
+			return false;
+
+		return true;
+	}
+
+	void DrawPoints(std::vector<Vector> points, uint32_t color)
+	{
+		const auto size = points.size();
+		for (size_t i = 0; i < size; ++i)
+		{
+			size_t const next_index = size - 1 == i ? 0 : i + 1;
+
+			auto const start = points[i];
+			auto const end = points[next_index];
+			if (OnScreen(start.WorldToScreen()) && OnScreen(end.WorldToScreen()))
+				g_Drawing->AddLine(start, end, color);
+		}
 	}
 
 }

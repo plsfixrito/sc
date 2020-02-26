@@ -28,6 +28,7 @@
     <ClCompile Include="..\SDK\Vector.cpp">
       <DeploymentContent>false</DeploymentContent>
     </ClCompile>
+    <ClCompile Include="AntiAfk.cpp" />
     <ClCompile Include="Barrier.cpp" />
     <ClCompile Include="PlayerRange.cpp" />
     <ClCompile Include="Extentions.cpp" />
@@ -44,6 +45,7 @@
     <ClCompile Include="Summs.h" />
     <ClCompile Include="Tracker.cpp" />
     <ClCompile Include="TurretRange.cpp" />
+    <ClCompile Include="Waypoints.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\SDK\clipper.hpp">
@@ -67,6 +69,7 @@
     <ClInclude Include="..\SDK\Vector.h">
       <DeploymentContent>false</DeploymentContent>
     </ClInclude>
+    <ClInclude Include="AntiAfk.h" />
     <ClInclude Include="Barrier.h" />
     <ClInclude Include="PlayerRange.h" />
     <ClInclude Include="Extentions.h" />
@@ -80,6 +83,7 @@
     <ClInclude Include="SkinHack.h" />
     <ClInclude Include="Tracker.h" />
     <ClInclude Include="TurretRange.h" />
+    <ClInclude Include="Waypoints.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

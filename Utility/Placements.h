@@ -2,6 +2,9 @@
 #include "../SDK/PluginSDK.h"
 #include "../SDK/EventArgs.h"
 #include "../SDK/EventHandler.h"
+#include "Extentions.h"
+
+using namespace Extentions;
 
 namespace Placements
 {
@@ -21,11 +24,18 @@ namespace Placements
 	{
 	public:
 		PlacementType Type = PlacementType::Unknown;
+		std::string DisplayName = "";
 		std::string ObjectName = "";
 		std::string BuffName = "";
 
-		PlacementInfo(std::string objName, std::string buffName, PlacementType type)
+		PlacementInfo()
 		{
+
+		}
+
+		PlacementInfo(std::string displayName, std::string objName, std::string buffName, PlacementType type)
+		{
+			DisplayName = displayName;
 			ObjectName = objName;
 			BuffName = buffName;
 			Type = type;
@@ -35,13 +45,16 @@ namespace Placements
 	class Placement
 	{
 	public:
-		PlacementType Type;
+		PlacementInfo Info;
 		std::string Display;
-		std::string BuffName;
 		Vector Position;
 		bool IsEnemy;
-		int Id;
+		bool IsWard;
+		bool DetectedByCast;
+		IGameObject* Object = nullptr;
 		int EndTime;
+		int StartTime;
+		std::vector<Vector> Points;
 
 		std::string DisplayString()
 		{
@@ -53,9 +66,19 @@ namespace Placements
 
 		bool Ended()
 		{
-			return (EndTime > 0 && g_Common->Time() >= EndTime);// || g_ObjectManager->GetEntityByNetworkID(Id)->IsDead();
+			return (EndTime > 0 && g_Common->Time() >= EndTime) || Object == nullptr || !Object->IsValid() || Object->IsDead();// || g_ObjectManager->GetEntityByNetworkID(Id)->IsDead();
 		}
 	};
+
+	void DrawPolygon(Geometry::Polygon poly, uint32_t color);
+
+	std::vector<Geometry::Polygon> ClipWards(std::vector<Geometry::Polygon> polygs);
+
+	void UpdateWardsClip(bool enemy);
+
+	void DrawWards(bool enemy, uint32_t color);
+
+	std::vector<Vector> GetWardVision(Vector pos);
 
 	void OnCreateObject(IGameObject* sender);
 
@@ -63,9 +86,9 @@ namespace Placements
 
 	void OnBuff(IGameObject* sender, OnBuffEventArgs* args);
 
-	bool OnScreen(Vector2 pos);
-
 	void OnHudDraw();
+
+	void GameUpdate();
 
 	void Load(IMenu* mainMenu, IMenuElement* toggle);
 

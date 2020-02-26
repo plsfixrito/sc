@@ -60,6 +60,9 @@
     </ClInclude>
     <ClInclude Include="VersionChecker.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="version" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <ProjectGuid>{5BAFA457-D6B9-4474-A91C-15B34885218E}</ProjectGuid>

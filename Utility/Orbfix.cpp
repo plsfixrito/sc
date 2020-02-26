@@ -51,7 +51,17 @@ namespace Orbfix
 				{
 					MaxRangeFixes++;
 					args->Process = false;
-					g_LocalPlayer->IssueOrder(IssueOrderType::MoveTo, g_Common->CursorPosition());
+					if (g_Common->TickCount() > AAEnd)
+					{
+						if (args->Target->IsAIHero())
+						{
+							auto target2 = g_Common->GetTarget(GetAutoAttackRange(g_LocalPlayer, args->Target), DamageType::Physical);
+							if (target2 != nullptr && IsInAutoAttackRange(g_LocalPlayer, target2))
+								g_LocalPlayer->IssueOrder(IssueOrderType::AttackUnit, target2);
+						}
+						else
+							g_LocalPlayer->IssueOrder(IssueOrderType::MoveTo, g_Common->CursorPosition());
+					}
 					return;
 				}
 			}

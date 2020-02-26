@@ -1,6 +1,7 @@
 #include "Tracker.h"
 #include "GankAlert.h"
 #include "Placements.h"
+#include "Waypoints.h"
 
 namespace Tracker
 {
@@ -10,11 +11,13 @@ namespace Tracker
 
 		//GankAlert::Load(menu, toggle);
 		Placements::Load(menu, toggle);
+		Waypoints::Load(menu, toggle);
 	}
 
 	void Unload()
 	{
 		//GankAlert::Unload();
 		Placements::Unload();
+		Waypoints::Unload();
 	}
 }

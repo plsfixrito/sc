@@ -12,4 +12,8 @@ namespace Extentions
 	bool IsInRange(IGameObject* source, IGameObject* target, float range);
 
 	bool IsInAutoAttackRange(IGameObject* source, IGameObject* target);
+
+	bool OnScreen(Vector2 pos);
+
+	void DrawPoints(std::vector<Vector> points, uint32_t color);
 }

@@ -112,20 +112,20 @@ namespace Items
 		if (!Toggle->GetBool() || !Enabled->GetBool())
 			return;
 
-		if (Debuffs.count(args->Buff.Type) == 0)
+		if (UseQssHP->GetInt() > g_LocalPlayer->HealthPercent())
 			return;
 
-		if (UseQssHP->GetInt() > g_LocalPlayer->HealthPercent())
+		if (Debuffs.count(args->Buff.Type) == 0)
 			return;
 
 		if (!QssMenu->GetElement(Debuffs[args->Buff.Type])->GetBool())
 			return;
 
-		for (auto& itemId : QssItems)
+		for (auto const& itemId : QssItems)
 		{
 			if (g_LocalPlayer->CanUseItem(itemId))
 			{
-				g_Common->DelayAction(rand()%(QssMaxDelay->GetInt()- QssMinDelay->GetInt() + 1) + QssMinDelay->GetInt(), [&]() { UseItem(itemId); });
+				g_Common->DelayAction(rand()%(QssMaxDelay->GetInt()- QssMinDelay->GetInt() + 1) + QssMinDelay->GetInt(), [&itemId]() { UseItem(itemId); });
 				return;
 			}
 		}
@@ -151,7 +151,7 @@ namespace Items
 		QssMinDelay = qss->AddSlider("Min Delay In ms", "QssMinDelay", 100, 0, 500);
 		QssMaxDelay = qss->AddSlider("Max Delay In ms", "QssMaxDelay", 300, 0, 500);
 		QssMenu = qss->AddSubMenu("Debuffs", "debuffs");
-		for (auto& debuff : Debuffs)
+		for (auto const& debuff : Debuffs)
 			QssMenu->AddCheckBox(debuff.second, debuff.second, Defaults[debuff.first]);
 
 		const auto cutlass = menu->AddSubMenu("Bilgewater Cutlass", "cutlass");

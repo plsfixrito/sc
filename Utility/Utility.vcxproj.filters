@@ -29,6 +29,9 @@
     <Filter Include="Items">
       <UniqueIdentifier>{1ba1c638-e3bf-4b10-8a81-560d1d5c106d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Tracker\Waypoints">
+      <UniqueIdentifier>{5694170c-2628-44c4-8dfb-5e6fe1236d7b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Main.cpp" />
@@ -85,6 +88,12 @@
     </ClCompile>
     <ClCompile Include="PlayerRange.cpp">
       <Filter>Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="AntiAfk.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="Waypoints.cpp">
+      <Filter>Tracker\Waypoints</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -147,6 +156,12 @@
     </ClInclude>
     <ClInclude Include="PlayerRange.h">
       <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="AntiAfk.h">
+      <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="Waypoints.h">
+      <Filter>Tracker\Waypoints</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

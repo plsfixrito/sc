@@ -2,26 +2,35 @@
 
 namespace Placements
 {
-	std::vector<Placement*> Tracked = std::vector<Placement*>();
-	std::vector<PlacementInfo*> Info = std::vector<PlacementInfo*>
+	std::vector<Placement> Tracked = std::vector<Placement>();
+
+	std::vector<PlacementInfo> Info = std::vector<PlacementInfo>
 	{
-		new PlacementInfo("SightWard", "sharedwardbuff", PlacementType::SightWard),
-		new PlacementInfo("JammerDevice", "", PlacementType::VisionWard),
-		new PlacementInfo("JhinTrap", "JhinETrap", PlacementType::JhinTrap),
-		new PlacementInfo("TeemoMushroom", "BantamTrap", PlacementType::Shroom),
-		new PlacementInfo("ShacoBox", "JackInTheBox", PlacementType::ShacoTrap),
-		new PlacementInfo("CaitlynTrap", "CaitlynYordleTrap", PlacementType::CaitlynTrap),
-		//new PlacementInfo("NidaleeTrap", "Trap", PlacementType::NidaleeTrap),
+		PlacementInfo("Ward", "SightWard", "sharedwardbuff", PlacementType::SightWard),
+		PlacementInfo("Control Ward", "JammerDevice", "", PlacementType::VisionWard),
+		PlacementInfo("Jhin E", "JhinTrap", "JhinETrap", PlacementType::JhinTrap),
+		PlacementInfo("Teemo R", "TeemoMushroom", "BantamTrap", PlacementType::Shroom),
+		PlacementInfo("Shaco W", "ShacoBox", "JackInTheBox", PlacementType::ShacoTrap),
+		PlacementInfo("Caitlyn W", "CaitlynTrap", "CaitlynYordleTrap", PlacementType::CaitlynTrap),
+		//PlacementInfo("NidaleeTrap", "Trap", PlacementType::NidaleeTrap),
 	};
 
-	std::map<PlacementType, std::string> DisplayNames = std::map<PlacementType, std::string>{
-		{ PlacementType::SightWard, "Ward" },
-		{ PlacementType::VisionWard, "Control Ward" },
-		{ PlacementType::JhinTrap, "Jhin E" },
-		{ PlacementType::Shroom, "Teemo R" },
-		{ PlacementType::ShacoTrap, "Shaco W" },
-		{ PlacementType::CaitlynTrap, "Caitlyn W" },
-		//{ PlacementType::NidaleeTrap, "Trap" },
+	std::map<ChampionId, SpellSlot> CastSlots = std::map<ChampionId, SpellSlot>
+	{
+		{ ChampionId::Caitlyn, SpellSlot::W },
+		{ ChampionId::Jhin, SpellSlot::E },
+		{ ChampionId::Teemo, SpellSlot::R },
+		{ ChampionId::Shaco, SpellSlot::W },
+		//{ ChampionId::Nidalee, SpellSlot::W },
+	};
+
+	std::map<ChampionId, PlacementType> Champlacemnt = std::map<ChampionId, PlacementType>
+	{
+		{ ChampionId::Caitlyn, PlacementType::CaitlynTrap },
+		{ ChampionId::Jhin, PlacementType::JhinTrap },
+		{ ChampionId::Teemo, PlacementType::Shroom },
+		{ ChampionId::Shaco, PlacementType::ShacoTrap },
+		//{ ChampionId::Nidalee, SpellSlot::W },
 	};
 
 	IMenuElement* Toggle = nullptr;
@@ -30,67 +39,187 @@ namespace Placements
 	IMenuElement* Ally = nullptr;
 	IMenuElement* Enemy = nullptr;
 
+	IMenuElement* ShowVisionToggle = nullptr;
+	IMenuElement* ShowVision = nullptr;
+	IMenuElement* VisionSegments = nullptr;
+	IMenuElement* WallChecks = nullptr;
+
 	IMenuElement* Green = nullptr;
 	IMenuElement* Red = nullptr;
 	IMenuElement* White = nullptr;
 	IMenu* PTT = nullptr;
 
+	bool LastToggle = false;
+	bool LastValue = false;
+	int LastSegments = 0;
+	int LastChecks = 0;
+
+	std::vector<Geometry::Polygon> AllyPolys;
+	std::vector<Geometry::Polygon> EnemyPolys;
+
+	void DrawPolygon(Geometry::Polygon poly, uint32_t color)
+	{
+		DrawPoints(poly.Points, color);
+	}
+
+	std::vector<Geometry::Polygon> ClipWards(std::vector<Geometry::Polygon> polygs)
+	{
+		return Geometry::Geometry::ToPolygons(Geometry::Geometry::ClipPolygons(polygs));
+	}
+
+	void UpdateWardsClip(bool enemy)
+	{
+		auto polys = std::vector<Geometry::Polygon>();
+
+		for (auto const& track : Tracked)
+		{
+			if (!track.IsWard)
+				return;
+
+			if ((enemy && track.IsEnemy) || (!enemy && !track.IsEnemy))
+			{
+				auto poly = Geometry::Circle(track.Position, 1000).ToPolygon();
+				poly.Points = track.Points;
+				polys.push_back(poly);
+			}
+		}
+
+		(enemy ? EnemyPolys : AllyPolys) = ClipWards(polys);
+	}
+
+	void DrawWards(bool enemy, uint32_t color)
+	{
+		const auto polys = (enemy ? EnemyPolys : AllyPolys);
+		if (polys.empty())
+			return;
+
+		for (auto const& poly : (enemy ? EnemyPolys : AllyPolys))
+			DrawPolygon(poly, color);
+	}
+
+	std::vector<Vector> GetWardVision(Vector pos)
+	{
+		std::vector<Vector> result = std::vector<Vector>();
+		const auto inGrass = g_NavMesh->HasFlag(pos, kNavFlagsGrass);
+		const auto range = 1000;
+		const auto ppc = range / LastChecks;
+		for (auto i = 0; i < LastSegments; i++)
+		{
+			auto added = false;
+			float outeradius = 0;
+			float angle = 0;
+			int notGrass = 0;
+			Vector LastPoint = Vector();
+			for (auto y = 1; y <= LastChecks; y++)
+			{
+				const auto exrange = ppc * y;
+				outeradius = exrange / (float)cos(2 * M_PI / LastSegments);
+				angle = i * 2 * M_PI / LastSegments;
+				const auto point = Vector(
+					pos.x + outeradius * (float)cos(angle), pos.y + outeradius * (float)sin(angle));
+
+				if (point.IsWall())
+				{
+					added = true;
+					result.push_back(point);
+					break;
+				}
+
+				if (!g_NavMesh->HasFlag(point, kNavFlagsGrass))
+				{
+					notGrass++;
+					LastPoint = point;
+				}
+				else if (notGrass > 1 && LastPoint.Distance(pos) >= 200)
+				{
+					added = true;
+					result.push_back(!LastPoint.IsZero() ? LastPoint : point);
+					break;
+				}
+			}
+
+			if (!added)
+			{
+				const auto outeradius = range / (float)cos(2 * M_PI / LastSegments);
+				const auto angle = i * 2 * M_PI / LastSegments;
+				const auto point = Vector(
+					pos.x + outeradius * (float)cos(angle), pos.y + outeradius * (float)sin(angle));
+				result.push_back(point);
+			}
+		}
+
+		return result;
+	}
+	
 	void OnCreateObject(IGameObject* sender)
 	{
-		PlacementType type = PlacementType::Unknown;
-		std::string buffName = "";
-		for (auto const& info : Info)
+		if (sender->IsMissileClient())
+			return;
+
+		PlacementInfo info;
+		for (auto const& i : Info)
 		{
-			if (sender->Name() == info->ObjectName || sender->BaseSkinName() == info->ObjectName)
+			if (sender->Name() == i.ObjectName || sender->BaseSkinName() == i.ObjectName)
 			{
-				buffName = info->BuffName;
-				type = info->Type;
+				info = i;
 				break;
 			}
 		}
 
-		if (type == PlacementType::Unknown)
+		if (info.Type == PlacementType::Unknown)
 			return;
+		
+		auto to = Placement();
 
-		auto to = new Placement();
+		to.Info = info;
+		to.Position = sender->Position();
+		to.IsEnemy = sender->IsEnemy();
+		to.Object = sender;
+		to.Position = sender->Position();
+		to.StartTime = g_Common->Time();
+		to.Display = info.DisplayName;
+		to.IsWard = info.Type == PlacementType::SightWard || info.Type == PlacementType::VisionWard;
 
-		to->Id = sender->NetworkId();
-		to->Type = type;
-		to->BuffName = buffName;
-		to->Display = DisplayNames[type];
-		to->Position = sender->Position();
-		to->IsEnemy = sender->IsEnemy();
+		if (to.IsWard)
+			to.Points = GetWardVision(to.Position);
 
-		if (to->BuffName != "")
+		if (to.Info.BuffName != "")
 		{
-			const auto buff = sender->GetBuff(to->BuffName.c_str());
+			const auto buff = sender->GetBuff(to.Info.BuffName.c_str());
 			if (buff.Valid)
 			{
-				to->EndTime = buff.EndTime;
+				to.EndTime = buff.EndTime;
 			}
 		}
 
 		Tracked.push_back(to);
+
+		if (!to.IsWard)
+			return;
+
+		UpdateWardsClip(to.IsEnemy);
 	}
 
 	void OnDeleteObject(IGameObject* sender)
 	{
-		Tracked.erase(std::remove_if(Tracked.begin(), Tracked.end(), [&sender](Placement* x)
+		if (sender->IsMissileClient())
+			return;
+
+		Tracked.erase(std::remove_if(Tracked.begin(), Tracked.end(), [&sender](Placement x)
 			{
-				if (sender->NetworkId() == x->Id || x->Ended())
+				if (sender->NetworkId() == x.Object->NetworkId() || x.Ended())
 				{
-					delete x;
+					x.Points.clear();
+					x.Points.shrink_to_fit();
+					if (x.IsWard)
+						UpdateWardsClip(x.IsEnemy);
 					return true;
 				}
 
 				return false;
 			}), Tracked.end());
 
-		if (Tracked.empty())
-		{
-			Tracked.clear();
-			Tracked.shrink_to_fit();
-		}
+		//Tracked.shrink_to_fit();
 	}
 
 	void OnBuff(IGameObject* sender, OnBuffEventArgs* args)
@@ -100,23 +229,12 @@ namespace Placements
 
 		for (auto& t : Tracked)
 		{
-			if (sender->NetworkId() == t->Id && t->BuffName == args->Buff.Name)
+			if (sender->NetworkId() == t.Object->NetworkId() && t.Info.BuffName == args->Buff.Name)
 			{
-				t->EndTime = args->Buff.EndTime;
+				t.EndTime = args->Buff.EndTime;
 				break;
 			}
 		}
-	}
-
-	bool OnScreen(Vector2 pos)
-	{
-		if (pos.x <= 0 || pos.y <= 0)
-			return false;
-
-		if (pos.x > g_Renderer->ScreenWidth() || pos.y > g_Renderer->ScreenHeight())
-			return false;
-
-		return true;
 	}
 
 	void OnHudDraw()
@@ -132,22 +250,66 @@ namespace Placements
 
 		const auto textColor = White->GetColor();
 
-		for (auto const& track : Tracked)
+		for (auto& track : Tracked)
 		{
-			if (track->IsEnemy && !drawEnemy)
+			if (track.IsEnemy && !drawEnemy)
 				continue;
 
-			if (!track->IsEnemy && !drawAlly)
+			if (!track.IsEnemy && !drawAlly)
 				continue;
 
-			if (!OnScreen(track->Position.WorldToScreen()))
+			if (!PTT->GetElement(track.Info.ObjectName)->GetBool())
+				continue;
+			
+			if (!OnScreen(track.Position.WorldToScreen()))
 				continue;
 
-			g_Drawing->AddCircle(track->Position, 100, (track->IsEnemy ? enemyColor : allyColor));
-			g_Drawing->AddText(track->Position, textColor, 16, track->DisplayString().c_str());
+			const auto color = (track.IsEnemy ? enemyColor : allyColor);
+			g_Drawing->AddCircle(track.Position, 100, (track.IsEnemy ? enemyColor : allyColor));
+			g_Drawing->AddText(track.Position, textColor, 16, track.DisplayString().c_str());
+		}
+
+		if (ShowVision->GetBool())
+		{
+			if (drawEnemy)
+				DrawWards(true, enemyColor);
+			if (drawAlly)
+				DrawWards(false, allyColor);
 		}
 	}
 
+	void GameUpdate()
+	{
+		if (LastToggle != ShowVisionToggle->GetBool())
+		{
+			LastToggle = ShowVisionToggle->GetBool();
+			LastValue = LastToggle;
+			ShowVision->SetBool(LastToggle);
+		}
+		else if (LastValue != ShowVision->GetBool())
+		{
+			LastValue = ShowVision->GetBool();
+			LastToggle = LastValue;
+			ShowVisionToggle->SetBool(LastValue);
+		}
+
+		if (!Toggle->GetBool() || !Enabled->GetBool())
+			return;
+
+		if (LastSegments != VisionSegments->GetInt() || LastChecks != WallChecks->GetInt())
+		{
+			LastSegments = VisionSegments->GetInt();
+			LastChecks = WallChecks->GetInt();
+
+			for (auto& track : Tracked)
+				if (track.IsWard)
+					track.Points = GetWardVision(track.Position);
+
+			UpdateWardsClip(true);
+			UpdateWardsClip(false);
+		}
+	}
+	
 	void Load(IMenu* mainMenu, IMenuElement* toggle)
 	{
 		Toggle = toggle;
@@ -158,7 +320,18 @@ namespace Placements
 		PTT = menu->AddSubMenu("Tracked", "tracked");
 
 		for (const auto& p : Info)
-			PTT->AddCheckBox(DisplayNames[p->Type], p->ObjectName, true);
+			PTT->AddCheckBox(p.DisplayName, p.ObjectName, true);
+
+		const auto ward = menu->AddSubMenu("Ward Settings", "wards");
+		ward->AddLabel("This Can Impact Performance", "notice");
+		ShowVision = ward->AddCheckBox("Show Ward Vision Area", "ShowVision", false);
+		ShowVisionToggle = ward->AddKeybind("Show Ward Vision Toggle", "ShowVisionToggle", 0x4c, false, KeybindType_Toggle);
+		LastToggle = ShowVisionToggle->GetBool();
+		LastValue = ShowVision->GetBool();
+		VisionSegments = ward->AddSlider("Vision Segments", "VisionSegments", 16, 16, 180);
+		WallChecks = ward->AddSlider("Vision Accuracy", "WallChecks", 10, 8, 40);
+		LastSegments = VisionSegments->GetInt();
+		LastChecks = WallChecks->GetInt();
 
 		Ally = menu->AddCheckBox("Track Allied", "Ally", false);
 		Enemy = menu->AddCheckBox("Track Enemy", "Enemy", true);
@@ -174,6 +347,7 @@ namespace Placements
 		EventHandler<Events::OnDeleteObject>::AddEventHandler(OnDeleteObject);
 		EventHandler<Events::OnBuff>::AddEventHandler(OnBuff);
 		EventHandler<Events::OnHudDraw>::AddEventHandler(OnHudDraw);
+		EventHandler<Events::GameUpdate>::AddEventHandler(GameUpdate);
 	}
 
 	void Unload()
@@ -182,21 +356,15 @@ namespace Placements
 		EventHandler<Events::OnDeleteObject>::RemoveEventHandler(OnDeleteObject);
 		EventHandler<Events::OnBuff>::RemoveEventHandler(OnBuff);
 		EventHandler<Events::OnHudDraw>::RemoveEventHandler(OnHudDraw);
+		EventHandler<Events::GameUpdate>::RemoveEventHandler(GameUpdate);
 
 		if (!Tracked.empty())
 		{
-			for (auto i = 0; i < Tracked.size(); i++)
-				delete Tracked[i];
-
 			Tracked.clear();
 			Tracked.shrink_to_fit();
 		}
 
-		for (auto i : Info)
-			delete i;
-
 		Info.clear();
 		Info.shrink_to_fit();
-		DisplayNames.clear();
 	}
 }

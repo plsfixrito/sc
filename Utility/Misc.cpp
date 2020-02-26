@@ -3,6 +3,7 @@
 #include "PlayerRange.h"
 #include "TurretRange.h"
 #include "Orbfix.h"
+#include "AntiAfk.h"
 
 namespace Misc
 {
@@ -14,6 +15,7 @@ namespace Misc
 		PlayerRange::Load(menu, toggle);
 		TurretRange::Load(menu, toggle);
 		Orbfix::Load(menu, toggle);
+		AntiAfk::Load(menu, toggle);
 	}
 
 	void Unload()
@@ -22,5 +24,6 @@ namespace Misc
 		PlayerRange::Unload();
 		TurretRange::Unload();
 		Orbfix::Unload();
+		AntiAfk::Unload();
 	}
 }

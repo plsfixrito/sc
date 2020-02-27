@@ -51,6 +51,7 @@ namespace Placements
 		bool IsEnemy;
 		bool IsWard;
 		bool DetectedByCast;
+		bool Removed;
 		IGameObject* Object = nullptr;
 		int EndTime;
 		int StartTime;
@@ -66,7 +67,8 @@ namespace Placements
 
 		bool Ended()
 		{
-			return (EndTime > 0 && g_Common->Time() >= EndTime) || Object == nullptr || !Object->IsValid() || Object->IsDead();// || g_ObjectManager->GetEntityByNetworkID(Id)->IsDead();
+			return (EndTime > 0 && g_Common->Time() >= EndTime) ||
+				Object == nullptr || !Object->IsValid() || Object->IsDead() || (IsWard && Object->Health() <= 0);// || g_ObjectManager->GetEntityByNetworkID(Id)->IsDead();
 		}
 	};
 

@@ -3,6 +3,7 @@
 #include "../SDK/EventArgs.h"
 #include "../SDK/EventHandler.h"
 #include "../SDK/PluginSDK_Enums.h"
+#include "Waypoints.h"
 
 class TrackedRecall
 {
@@ -13,13 +14,16 @@ public:
     float HealthPred = 0;
     float RecallEnd = 0;
     float Duration = 0;
-    float TravelTime = 0;
+    float TravelTimeBase = 0;
+    float TravelTimeRecall = 0;
     float InvsTicks = 0;
     IGameObject* Target = nullptr;
     bool ShoutUpdateHealth = false;
+    bool CorrectRecallPos = false;
     bool Shoot = false;
     bool Skipped = false;
     Vector EndPosition;
+    Vector RecallPosition;
 
     float Health()
     {
@@ -45,6 +49,8 @@ public:
     IMenu* Targets = nullptr;
     IMenuElement* DisableKey = nullptr;
     IMenuElement* IncludePing = nullptr;
+    IMenuElement* NormalUlt = nullptr;
+    IMenuElement* NormalUltTol = nullptr;
 
     IMenuElement* DrawRecalls = nullptr;
     IMenuElement* RecallWidth = nullptr;
@@ -56,10 +62,12 @@ public:
     IMenuElement* BackgroundColor = nullptr;
     IMenuElement* BlackColor = nullptr;
 
+    Vector LastUltPos;
+
     const Vector BlueSpawn = Vector(400, 420, 182);
     const Vector RedSpawn = Vector(14290, 14393, 172);
     
-    // if visiable recalling, ticks left more than travel time to base and traveltime less than recall spot, ult recall spot
+    // if visiable recalling, travel time to base more than ticks left and traveltime less than recall spot, ult recall spot
     // if not visiable recalling since 3s or less, predict based on last path position and apply above, prefer baseult
     // normal base ult
     BaseUlt(IMenu* MenuInstance, IMenuElement* toggle, std::shared_ptr<ISpell> spell)
@@ -77,6 +85,9 @@ public:
             Targets->AddCheckBox(enemy->ChampionName(), enemy->ChampionName(), true)->SetBool(true);
 
         IncludePing = BUSubMenu->AddCheckBox("Include Ping In Calculations", "IncludePing", true);
+        NormalUlt = BUSubMenu->AddCheckBox("Predicted Recall Position (Experimental)", "NormalUlt", true);
+        NormalUltTol = BUSubMenu->AddSlider("^ Max Invisible Seconds", "NormalUltTol", 3, 1, 5);
+        NormalUltTol->SetTooltip("This Applies to Predicted Ult Only.");
 
         const auto drawings = BUSubMenu->AddSubMenu("Drawings", "draw2");
         DrawRecalls = drawings->AddCheckBox("Draw Recalls", "DrawRecalls", true);
@@ -89,6 +100,8 @@ public:
         ShotColor = drawings->AddColorPicker("Shoot Color", "shoot", 255, 125, 40, 250);
         BackgroundColor = drawings->AddColorPicker("Background Color", "back", 245, 245, 245, 250);
         BlackColor = drawings->AddColorPicker("back Color", "back3", 255, 255, 255, 255, false);
+
+        Waypoints::Load(toggle);
     }
 
     bool IsEnabled()
@@ -106,7 +119,7 @@ public:
         return (((pos.Distance(g_LocalPlayer->Position()) / spell->Speed()) * 1000.f) + (spell->Delay() * 1000.f)) + (IncludePing->GetBool() ? g_Common->Ping() : 0);
     }
 
-    bool IsPossible(TrackedRecall recall)
+    bool IsPossibleBaseUlt(TrackedRecall recall)
     {
         if (recall.Ended())
             return false;
@@ -116,10 +129,35 @@ public:
             return false;
 
         //auto ticksLeft = recall.RecallEnd - g_Common->TickCount();
-        return recall.Duration > recall.TravelTime && (recall.RecallEnd - g_Common->TickCount()) > recall.TravelTime;
+        return recall.Duration > recall.TravelTimeBase && (recall.RecallEnd - g_Common->TickCount()) > recall.TravelTimeBase;
     }
 
-    bool CanUlt(TrackedRecall recall)
+    bool IsPossibleNormalUlt(TrackedRecall recall)
+    {
+        if (recall.Ended() || !NormalUlt->GetBool())
+            return false;
+
+        if (recall.Health() >= recall.Damage || recall.RecallPosition.IsZero() || recall.RecallPosition.Distance(BlueSpawn) < 100)
+        {
+            g_Log->Print("Cant normal ult ZERO/DMG");
+            return false;
+        }
+
+        recall.TravelTimeRecall = TravelTime(recall.RecallPosition, R) + 100;
+
+        // got the correct spot OR invs less than set time
+        const auto can = recall.CorrectRecallPos || recall.InvsTicks < NormalUltTol->GetInt() * 1000;
+
+        if (!can)
+        {
+            g_Log->Print("Cant normal ult");
+            return false;
+        }
+
+        return recall.Duration > recall.TravelTimeRecall && can;// && (recall.RecallEnd - g_Common->TickCount()) >= recall.TravelTimeRecall;
+    }
+
+    bool CanBaseUlt(TrackedRecall recall)
     {
         if (recall.Ended())
             return false;
@@ -127,17 +165,40 @@ public:
         if (recall.Health() >= recall.Damage)
             return false;
 
-        recall.TravelTime = TravelTime(recall.EndPosition, R);
+        recall.TravelTimeBase = TravelTime(recall.EndPosition, R);
 
-        if (recall.TravelTime > recall.Duration)
+        if (recall.TravelTimeBase > recall.Duration)
             return false;
 
         //auto ticksLeft = recall.RecallEnd - g_Common->TickCount();
         //auto castOffset = 50 + g_Common->Ping()/2;
         //auto mod = ticksLeft - recall.TravelTime;
 
-        return Targets->GetElement(recall.Target->ChampionName())->GetBool() && recall.TravelTime >= (recall.RecallEnd - g_Common->TickCount());
+        return Targets->GetElement(recall.Target->ChampionName())->GetBool() && recall.TravelTimeBase >= (recall.RecallEnd - g_Common->TickCount());
             //&& castOffset >= mod && recall.Duration > recall.TravelTime;//&& ticksLeft > recall.TravelTime;
+    }
+
+    bool CanNormalUlt(TrackedRecall recall)
+    {
+        if (recall.Ended() || !NormalUlt->GetBool())
+            return false;
+
+        if (recall.Health() >= recall.Damage || recall.RecallPosition.IsZero() || recall.RecallPosition.Distance(BlueSpawn) < 100)
+        {
+            g_Log->Print("Cant normal ult ZERO/DMG");
+            return false;
+        }
+
+        recall.TravelTimeRecall = TravelTime(recall.RecallPosition, R) + 100;
+
+        if (recall.TravelTimeRecall > recall.Duration || recall.InvsTicks > NormalUltTol->GetInt() * 1000)
+        {
+            g_Log->Print("Cant normal invsticks");
+            g_Log->Print(std::to_string(recall.InvsTicks).c_str());
+            return false;
+        }
+        
+        return Targets->GetElement(recall.Target->ChampionName())->GetBool() && recall.TravelTimeRecall >= (recall.RecallEnd - g_Common->TickCount());
     }
 
     void OnUpdate()
@@ -148,12 +209,7 @@ public:
         for (const auto& e : g_ObjectManager->GetChampions(false))
         {
             if (e->IsVisible())
-            {
-                if (LastVision.count(e->NetworkId()) == 0)
-                    LastVision.insert({ e->NetworkId(), g_Common->TickCount() });
-                else
-                    LastVision[e->NetworkId()] = g_Common->TickCount();
-            }
+                LastVision[e->NetworkId()] = g_Common->TickCount();
         }
 
         if (TrackedRecalls.empty())
@@ -168,17 +224,24 @@ public:
             if (recall.Shoot || recall.Skipped || recall.Ended())
                 continue;
 
-            recall.TravelTime = TravelTime(recall.EndPosition, R);
+            recall.TravelTimeBase = TravelTime(recall.EndPosition, R);
+            recall.TravelTimeRecall = TravelTime(recall.RecallPosition, R) + 100;
 
             if (recall.Target->IsVisible())
             {
-                recall.InvsTicks = 0;
                 if (recall.ShoutUpdateHealth)
                 {
                     recall.ShoutUpdateHealth = false;
                     recall.LastHealth = recall.Target->RealHealth(false, false);
                 }
 
+                if (!recall.CorrectRecallPos)
+                {
+                    recall.RecallPosition = recall.Target->Position();
+                    recall.CorrectRecallPos = true;
+                }
+
+                recall.InvsTicks = 0;
                 recall.LastHealthReg = recall.Target->HPRegenRate();
                 recall.HealthPred = recall.LastHealth + (recall.LastHealthReg * (recall.Duration / 1000.f));
             }
@@ -201,12 +264,34 @@ public:
             else if (recall.HealthPred == 0)
                 recall.HealthPred = recall.LastHealth;
 
-            if (CanUlt(recall))
+            if (IsPossibleNormalUlt(recall))
             {
-                if (IsReady())
+                if (CanNormalUlt(recall))
+                {
+                    if (IsReady() && R->FastCast(recall.RecallPosition))
+                    {
+                        recall.Shoot = true;
+                        LastUltPos = recall.RecallPosition;
+                        g_Log->Print("normal ult");
+                    }
+                    else
+                    {
+                        recall.Skipped = true;
+                    }
+                    break;
+                }
+
+                break;
+            }
+
+            if (CanBaseUlt(recall))
+            {
+                if (IsReady() && R->FastCast(recall.RecallPosition))
                 {
                     recall.Shoot = true;
                     R->FastCast(recall.EndPosition);
+                    LastUltPos = recall.EndPosition;
+                    g_Log->Print("base ult");
                 }
                 else
                 {
@@ -259,6 +344,9 @@ public:
         if (!IsEnabled() || !DrawRecalls->GetBool())
             return;
 
+        if (!LastUltPos.IsZero())
+            g_Drawing->AddCircle(LastUltPos, 160, ShotColor->GetColor(), 15);
+
         if (TrackedRecalls.empty())
             return;
 
@@ -287,10 +375,16 @@ public:
                 DrawRectProg(pos, Vector2(endx, pos.y), ShotColor->GetColor(), height, 1);
                 //pos.y += height * 1.5f;
             }
-            else if (IsPossible(recall))
+            else if (IsPossibleNormalUlt(recall) && (recall.RecallEnd - g_Common->TickCount()) >= recall.TravelTimeRecall)
             {
                 DrawRectProg(pos, Vector2(endx, pos.y), CantUltColor->GetColor(), height, 1);
-                const auto at = recall.TravelTime / recall.Duration;
+                const auto at = recall.TravelTimeRecall / recall.Duration;
+                DrawRectProg(pos, Vector2(pos.x + (width * at), pos.y), CanUltColor->GetColor(), height, 1);
+            }
+            else if (IsPossibleBaseUlt(recall))
+            {
+                DrawRectProg(pos, Vector2(endx, pos.y), CantUltColor->GetColor(), height, 1);
+                const auto at = recall.TravelTimeBase / recall.Duration;
                 DrawRectProg(pos, Vector2(pos.x + (width * at), pos.y), CanUltColor->GetColor(), height, 1);
             }
             else
@@ -309,7 +403,8 @@ public:
         if (sender == nullptr || !sender->IsEnemy() || !sender->IsAIHero())
             return;
 
-        if (args->Type == OnTeleportEventArgs::TeleportType::Recall && args->Status == OnTeleportEventArgs::TeleportStatus::Start)
+        if ((args->Type == OnTeleportEventArgs::TeleportType::Recall || args->Type == OnTeleportEventArgs::TeleportType::SuperRecall) &&
+            args->Status == OnTeleportEventArgs::TeleportStatus::Start)
         {
             TrackedRecalls.erase(std::remove_if(TrackedRecalls.begin(), TrackedRecalls.end(),
                 [&sender](TrackedRecall recall) -> bool
@@ -318,15 +413,28 @@ public:
                 }), TrackedRecalls.end());
 
             auto tr = TrackedRecall();
+
+            if (sender->IsVisible())
+            {
+                tr.CorrectRecallPos = true;
+                tr.RecallPosition = sender->Position();
+            }
+            else
+            {
+                tr.CorrectRecallPos = false;
+                tr.RecallPosition = Waypoints::GetPredictedPosition(sender);
+            }
+
             tr.Target = sender;
             tr.Damage = R->Damage(sender);
             tr.LastHealth = sender->RealHealth(false, false);
             tr.LastHealthReg = sender->HPRegenRate();
-            tr.Duration = sender->HasBuff("exaltedwithbaronnashor") ? args->Duration / 2 : args->Duration;
+            tr.Duration = args->Duration;
             tr.RecallEnd = g_Common->TickCount() + tr.Duration;
             tr.EndPosition = sender->Team() == GameObjectTeam::Order ? BlueSpawn : RedSpawn;
-            tr.TravelTime = TravelTime(tr.EndPosition, R);
-            tr.Skipped = tr.TravelTime > tr.Duration;
+            tr.TravelTimeBase = TravelTime(tr.EndPosition, R);
+            tr.TravelTimeRecall = TravelTime(tr.RecallPosition, R) + 100;
+            tr.Skipped = tr.TravelTimeBase > tr.Duration && tr.TravelTimeRecall > tr.Duration;
             tr.ShoutUpdateHealth = !sender->IsVisible();
             if (!sender->IsVisible() && LastVision.count(sender->NetworkId()) > 0)
                 tr.InvsTicks = g_Common->TickCount() - LastVision[sender->NetworkId()];
@@ -358,5 +466,7 @@ public:
         {
             LastVision.clear();
         }
+
+        Waypoints::Unload();
     }
 };

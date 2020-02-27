@@ -76,16 +76,16 @@ namespace Waypoints
 		const auto size = path.size() - 1;
 		for (auto i = 0; i < size; i++)
 		{
-			const auto start = path[i];
-			const auto end = path[i + 1];
+			const auto start = path[i].WorldToScreen();
+			const auto end = path[i + 1].WorldToScreen();
 
-			g_Drawing->AddLine(start, end, color, 1.5f);
+			g_Drawing->AddLineOnScreen(start, end, color, 1.5f);
 			if (i == size - 1) // last point
 			{
-				g_Drawing->AddCircle(end, 30, color);
+				g_Drawing->AddCircleOnScreen(end, 30, color, 1);
 				const auto num_text = std::to_string(wayPoint.ArriveTime - g_Common->Time());
 				const auto str = num_text.substr(0, num_text.find(".") + 3);
-				g_Drawing->AddTextOnScreen(end.WorldToScreen(), TextColor->GetColor(), FontSize->GetInt(), (sender->ChampionName() + " - " + str).c_str());
+				g_Drawing->AddTextOnScreen(end, TextColor->GetColor(), FontSize->GetInt(), (sender->ChampionName() + " - " + str).c_str());
 			}
 		}
 	}

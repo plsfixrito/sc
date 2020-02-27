@@ -59,6 +59,7 @@
       <DeploymentContent>false</DeploymentContent>
     </ClInclude>
     <ClInclude Include="VersionChecker.h" />
+    <ClInclude Include="Waypoints.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="version" />

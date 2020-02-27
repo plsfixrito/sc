@@ -21,15 +21,19 @@ namespace Menu
     {
         IMenuElement* Q = nullptr;
         IMenuElement* W = nullptr;
+
         IMenuElement* E = nullptr;
         IMenuElement* EQ = nullptr;
         IMenuElement* EAA = nullptr;
         IMenuElement* EW = nullptr;
+        IMenuElement* ECombo = nullptr;
+
         IMenuElement* RCombo = nullptr;
         IMenuElement* RExecute = nullptr;
         IMenuElement* RAoE = nullptr;
         IMenuElement* RAoEHits = nullptr;
         IMenuElement* RRange = nullptr;
+        IMenuElement* RCheckAllies = nullptr;
         IMenuElement* RDistance = nullptr;
     }
 
@@ -117,7 +121,6 @@ bool TryEQ = false;
 bool EnemyHasSinged = false;
 const char* EzrealWBuff = "ezrealwattach";
 
-std::string profile = "";
 BaseUlt* BUInstance;
 JungleSteal* JSInstance;
 
@@ -127,7 +130,7 @@ IPredictionOutput LastPred;
 DamageInput* QDamageInput;
 
 std::map<int, IGameObject*> TurretLastTarget = std::map<int, IGameObject*>();
-//std::vector<PreCalculatedDamage*> DamageCache = std::vector<PreCalculatedDamage*>();
+std::map<int, IBuffInstance> WTargets = std::map<int, IBuffInstance>();
 
 // TODO add Sviri W and other spell shields
 bool IsKillable(IGameObject* target)
@@ -160,13 +163,11 @@ bool IsKillable(IGameObject* target)
 
 bool HasWBuff(IGameObject* target)
 {
-    for (auto const&  b : target->GetBuffList())
-    {
-        if (StringEquals(b.Name.c_str(), EzrealWBuff, true) && b.Caster != nullptr && b.Caster->IsAlly())
-            return true;
-    }
+    if (WTargets.count(target->NetworkId()) == 0)
+        return false;
 
-    return false;
+    const auto buff = WTargets[target->NetworkId()];
+    return buff.Valid && buff.Alive && buff.EndTime > g_Common->Time();
 }
 
 bool IsEpic(IGameObject* target)
@@ -199,7 +200,7 @@ IPredictionOutput GetRPred(IGameObject* target)
 
 bool TurretTargetingHero(IGameObject* turret)
 {
-    if (turret == nullptr || !turret->IsValidTarget() || TurretLastTarget.empty() || TurretLastTarget.count(turret->NetworkId()) == 0)
+    if (turret == nullptr || !turret->IsValidTarget() || TurretLastTarget.count(turret->NetworkId()) == 0)
         return false;
 
     const auto tlt = TurretLastTarget[turret->NetworkId()];
@@ -257,34 +258,6 @@ float GetDamage(IGameObject* target, std::shared_ptr<ISpell> spell)
         spell->Slot() == SpellSlot::Q ? QDamage(target) :
         spell->Slot() == SpellSlot::W ? WDamage(target) :
         spell->Damage(target);
-    /*
-    const bool isaa = spell == nullptr;
-    for (auto const& dc : DamageCache)
-    {
-        if (dc->UnitId == target->NetworkId() && (isaa ? dc->Slot == SpellSlot::Invalid : spell->Slot() == dc->Slot))
-            return dc->Damage;
-    }
-
-    auto ndc = new PreCalculatedDamage();
-    ndc->UnitId = target->NetworkId();
-    ndc->LastCheck = g_Common->TickCount();
-    ndc->Slot = isaa ? SpellSlot::Invalid : spell->Slot();
-    if (isaa)
-    {
-        ndc->Damage = g_LocalPlayer->AutoAttackDamage(target, true);
-    }
-    else if (spell != nullptr)
-    {
-        ndc->Damage =
-            spell->Slot() == SpellSlot::Q ? QDamage(target) :
-            spell->Slot() == SpellSlot::W ? WDamage(target) :
-            spell->Damage(target);
-    }
-
-    DamageCache.push_back(ndc);
-
-    return ndc->Damage;
-    */
 }
 
 bool compareHealth(IGameObject* t1, IGameObject* t2)
@@ -420,16 +393,14 @@ IPredictionOutput* GetKSTarget(bool useHP = false)
     return nullptr;
 }
 
-bool CastE(IGameObject* target, bool procW = false)
+bool CastE(IGameObject* target, bool procW = false, bool haswbuff = false)
 {
-    const auto wbuff = HasWBuff(target);
+    const auto wbuff = haswbuff || HasWBuff(target);
     if (procW && !wbuff)
         return false;
 
     if (!procW && Spells::Q->ManaCost() > g_LocalPlayer->Mana() - Spells::E->ManaCost())
-    {
         return false;
-    }
 
     const auto extended = g_LocalPlayer->Position().Extend(g_Common->CursorPosition(), Spells::E->Range());
 
@@ -451,9 +422,10 @@ bool CastE(IGameObject* target, bool procW = false)
     }
 
     const auto epred = PredPos(target, Spells::E->Delay() * 1.25f);
+    const auto epredis = extended.Distance(epred);
     if (g_LocalPlayer->IsUnderEnemyTurret())
     {
-        if (!extenduet && extended.Distance(epred) < g_LocalPlayer->AttackRange())
+        if (!extenduet && epredis < g_LocalPlayer->AttackRange())
         {
             g_Log->Print("kEzreal: E out of Enemy Turret");
             return Spells::E->Cast(extended);
@@ -486,7 +458,7 @@ bool CastE(IGameObject* target, bool procW = false)
 
     if (procW)
     {
-        if (inAARange == 0 && extended.Distance(epred) < Spells::E->Radius() - 50)
+        if (inAARange == 0 && epredis < Spells::E->Radius() - 50)
         {
             g_Log->Print("kEzreal: E Proc W Buff");
             return Spells::E->Cast(extended);
@@ -495,7 +467,7 @@ bool CastE(IGameObject* target, bool procW = false)
     }
 
     const auto trhpm = target->RealHealth(false, true);
-    if (Menu::Combo::EW->GetBool() && extended.Distance(epred) < Spells::E->Radius() && wbuff)
+    if (Menu::Combo::EW->GetBool() && epredis < Spells::E->Radius() && wbuff)
     {
         if (GetDamage(target, Spells::W) + GetDamage(target, Spells::E) > trhpm)
         {
@@ -509,7 +481,7 @@ bool CastE(IGameObject* target, bool procW = false)
 
     if (Menu::Combo::EAA->GetBool() && aadmg > trhpp)
     {
-        if (extended.Distance(epred) < g_LocalPlayer->AttackRange())
+        if (epredis < g_LocalPlayer->AttackRange())
         {
             g_Log->Print("kEzreal: E > AA Execute");
             return Spells::E->Cast(extended);
@@ -532,13 +504,12 @@ bool CastE(IGameObject* target, bool procW = false)
         }
     }
 
-    const auto tdis = epred.Distance(extended);
-    if (tdis < Spells::E->Radius() - 50)
+    if (Menu::Combo::ECombo->GetBool() && epredis < Spells::E->Radius() - 50)
     {
         auto comboDmg = GetDamage(target, Spells::E);
         auto mana = Spells::E->ManaCost();
 
-        if (tdis < g_LocalPlayer->AttackRange())
+        if (epredis < g_LocalPlayer->AttackRange())
             comboDmg += aadmg;
 
         if (qpred.Hitchance >= HitChance::High)
@@ -556,16 +527,19 @@ bool CastE(IGameObject* target, bool procW = false)
             }
         }
 
-        if (comboDmg > target->RealHealth(true, true) && g_LocalPlayer->Mana() - mana > 0)
+        if (g_LocalPlayer->Mana() - mana > 0)
         {
-            g_Log->Print("kEzreal: E Combo Execute");
-            return Spells::E->Cast(extended);
-        }
+            if (comboDmg > target->RealHealth(true, true))
+            {
+                g_Log->Print("kEzreal: E Combo Execute");
+                return Spells::E->Cast(extended);
+            }
 
-        if (wbuff && g_LocalPlayer->Mana() - mana > 0)
-        {
-            g_Log->Print("kEzreal: E > W Last Option");
-            return Spells::E->Cast(extended);
+            if (wbuff)
+            {
+                g_Log->Print("kEzreal: E > W Last Option");
+                return Spells::E->Cast(extended);
+            }
         }
     }
 
@@ -597,73 +571,150 @@ bool AntiGapCloser(IGameObject* sender, OnNewPathEventArgs* args)
     return false;
 }
 
+std::vector<Vector> CircleCircleIntersection(const Vector& center1, const Vector& center2, float radius1, float radius2)
+{
+    std::vector<Vector> result;
+
+    float d = center1.Distance(center2);
+
+    if (d > radius1 + radius2 || d <= abs(radius1 - radius2))
+    {
+        return result;
+    }
+
+    float a = (radius1 * radius1 - radius2 * radius2 + d * d) / (2 * d);
+    float h = (float)sqrt(radius1 * radius1 - a * a);
+    Vector direction = (center2 - center1).Normalized();
+    Vector pa = center1 + direction * a;
+    Vector s1 = pa + direction.Perpendicular() * h;
+    Vector s2 = pa - direction.Perpendicular() * h;
+
+    result.push_back(s1);
+    result.push_back(s2);
+    return result;
+}
+
+std::vector<Vector> GetHits(Vector start, Vector end, float radius, std::vector<IPredictionOutput> points)
+{
+    std::vector<Vector> result;
+    for (auto const& point : points)
+        if (point.UnitPosition.Distance(start, end, true, true) <= radius * radius)
+            result.push_back(point.UnitPosition);
+    return result;
+}
+
 bool RAoE(int hits, HitChance minHitchance = HitChance::Low)
 {
-    std::vector<Vector> positions;
-
+    std::vector<IGameObject*> targets;
     const auto range = Menu::Combo::RRange->GetInt() + 150;
     for (auto const& target : g_ObjectManager->GetChampions(false))
     {
         if (!target->IsValidTarget(range))// || !IsKillable(target))
             continue;
 
+        targets.push_back(target);
+    }
+
+    if (hits > targets.size())
+        return false;
+
+    std::vector<IPredictionOutput> positions;
+    std::vector<Vector> candidates;
+    const auto from = g_LocalPlayer->Position();
+    const auto radius = Spells::R->Radius();
+
+    for (auto const& target : targets)
+    {
         const auto pred = GetRPred(target);
-        if (pred.Hitchance >= minHitchance)
-            positions.emplace_back(pred.CastPosition);
+        if (minHitchance > pred.Hitchance)
+            continue;
+
+        const auto to = target->Position();
+
+        const auto middlePoint = (from + to) / 2;
+        const auto intersections = CircleCircleIntersection(from, middlePoint, radius, from.Distance(middlePoint));
+
+        if (intersections.size() > 1)
+        {
+            auto c1 = intersections[0];
+            auto c2 = intersections[1];
+
+            c1 = from + (to - c1).Normalized() * range;
+            c2 = from + (to - c2).Normalized() * range;
+
+            candidates.push_back(c1);
+            candidates.push_back(c2);
+            positions.push_back(pred);
+        }
     }
 
     if (positions.empty())
         return false;
 
-    Vector biggestPos;
     int biggestHits = 0;
-    const auto start = g_LocalPlayer->Position();
-    for (auto const& castPos : positions)
+    Vector biggestPos;
+    std::vector<Vector> biggestPoints;
+    for (const auto& candidate : candidates)
     {
-        auto rect = Geometry::Rectangle(start,
-                    g_LocalPlayer->Position().Extend(castPos, range),
-                    Spells::R->Radius());
+        if (GetHits(from, candidate, radius + targets[0]->BoundingRadius() / 3 - 10, std::vector<IPredictionOutput> { positions[0] }).size() == 0)
+            continue;
 
-        auto counter = 0;
-        auto poly = rect.ToPolygon();
-
-        for (auto const& castPos2 : positions)
-            if (poly.IsInside(castPos2))
-                counter++;
-
-        if (counter > biggestHits)
+        const auto chits = GetHits(from, candidate, radius, positions);
+        const auto hitcount = chits.size();
+        if (hitcount >= biggestHits)
         {
-            biggestPos = castPos;
-            biggestHits = counter;
+            biggestHits = hitcount;
+            biggestPos = candidate;
+            biggestPoints = chits;
         }
-
-        //poly.Points.clear();
     }
-    
-    //positions.clear();
 
-    if (biggestHits >= hits)
-        return Spells::R->FastCast(biggestPos);
+    if (hits > biggestHits)
+        return false;
 
-    return false;
+    auto maxDis = 0.f;
+    Vector p1, p2;
+
+    for (auto const& pos1 : biggestPoints)
+    {
+        for (auto const& pos2 : biggestPoints)
+        {
+            const auto startP = from;
+            const auto endP = biggestPos;
+            const auto proj1 = pos1.ProjectOn(startP, endP);
+            const auto proj2 = pos2.ProjectOn(startP, endP);
+            const auto dist = pos1.DistanceSquared(proj1.LinePoint)
+                + pos2.DistanceSquared(proj2.LinePoint);
+            if (dist >= maxDis
+                && (proj1.LinePoint - pos1).AngleBetween(
+                    proj2.LinePoint - pos2) > 90)
+            {
+                maxDis = dist;
+                p1 = pos1;
+                p2 = pos2;
+            }
+        }
+    }
+
+    return Spells::R->FastCast((p1 + p2) * 0.5f);
 }
 
 bool HandleCombo()
 {
     if (Spells::R->IsReady())
     {
-        bool triedAoER = false;
         if (g_LocalPlayer->CountEnemiesInRange(Menu::Combo::RDistance->GetInt()) == 0)
         {
             if (Menu::Combo::RExecute->GetBool())
             {
                 const auto rExecute = g_Common->GetTarget(Menu::Combo::RRange->GetInt(), DamageType::Magical);
 
-                if (rExecute != nullptr &&
-                    rExecute->CountMyAlliesInRange(700) == 0)
+                if (rExecute != nullptr)
                 {
                     const auto rhp = rExecute->RealHealth(false, true);//RHealthPrediction(rExecute);
-                    if (rhp > 0 && GetDamage(rExecute, Spells::R) > rhp &&
+                    if (rhp > 0 &&
+                        GetDamage(rExecute, Spells::R) > rhp &&
+                        (!Menu::Combo::RCheckAllies->GetBool() || rExecute->CountMyAlliesInRange(700) == 0) &&
                         IsKillable(rExecute))
                     {
                         const auto pred = GetRPred(rExecute);
@@ -682,11 +733,10 @@ bool HandleCombo()
                 {
                     return true;
                 }
-                triedAoER = true;
             }
         }
 
-        if (!triedAoER && Menu::Combo::RCombo->GetBool())
+        if (Menu::Combo::RCombo->GetBool())
         {
             if (RAoE(2, HitChance::Dashing))
             {
@@ -707,7 +757,8 @@ bool HandleCombo()
     }
 
     LastTarget = qTarget;
-    if (Menu::Combo::E->GetBool() && Spells::E->IsReady() && CastE(qTarget))
+    const auto haswbuff = HasWBuff(qTarget);
+    if (Menu::Combo::E->GetBool() && Spells::E->IsReady() && CastE(qTarget, false, haswbuff))
     {
         return false;
     }
@@ -716,7 +767,7 @@ bool HandleCombo()
     LastPred = qPred;
     if (!TryEQ)
     {
-        if (Menu::Combo::W->GetBool() && Spells::W->IsReady() && !HasWBuff(qTarget) && Spells::Q->IsReady() &&
+        if (Menu::Combo::W->GetBool() && Spells::W->IsReady() && !haswbuff && Spells::Q->IsReady() &&
             g_LocalPlayer->Mana() > Spells::Q->ManaCost() + Spells::W->ManaCost() &&
             qPred.Hitchance >= HitChance::Medium)
         {
@@ -729,11 +780,10 @@ bool HandleCombo()
 
     if (Menu::Combo::Q->GetBool() && Spells::Q->IsReady())
     {
-        if (qPred.Hitchance >= ((TryEQ || HasWBuff(qTarget)) ? HitChance::Low : HitChance::Medium))
+        if (qPred.Hitchance >= ((TryEQ || haswbuff) ? HitChance::Low : HitChance::Medium))
         {
             Spells::Q->Cast(qPred.CastPosition);
             TryEQ = false;
-
             return true;
         }
     }
@@ -773,7 +823,7 @@ bool HandleHarass()
                     return true;
             }
         }
-        else if (CastE(qTarget, true))
+        else if (CastE(qTarget, true, hasw))
             return true;
     }
 
@@ -964,22 +1014,6 @@ void OnGameUpdate()
         return;
     }
 
-    /*if (!DamageCache.empty())
-    {
-        DamageCache.erase(std::remove_if(DamageCache.begin(), DamageCache.end(),
-            [](PreCalculatedDamage* t) -> bool
-            {
-                if (g_Common->TickCount() - t->LastCheck > 500)
-                {
-                    delete t;
-                    return true;
-                }
-                return false;
-            }), DamageCache.end());
-
-        //DamageCache.shrink_to_fit();
-    }*/
-
     // avoid useless code to run while casting stuff
     if (g_LocalPlayer->GetSpellbook()->IsCastingSpell() || g_LocalPlayer->GetSpellbook()->IsChanneling())
     {
@@ -1081,8 +1115,6 @@ void OnHudDraw()
 
     if (Menu::Drawings::RDistance->GetBool())
         g_Drawing->AddCircle(PlayerPosition, Menu::Combo::RDistance->GetInt(), Menu::Colors::RDistance->GetColor(), CirclesWidth);
-
-    g_Drawing->AddTextOnScreen(Vector2(g_Renderer->ScreenWidth() * 0.25f, 10), Menu::Colors::RDistance->GetColor(), 16, profile.c_str());
 
     if (!g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeCombo) &&
         !g_Orbwalker->IsModeActive(eOrbwalkingMode::kModeHarass) &&
@@ -1232,11 +1264,11 @@ void OnNewPath(IGameObject* sender, OnNewPathEventArgs* args)
 
 void OnBuff(IGameObject* sender, OnBuffEventArgs* args)
 {
-    if (!sender->IsMe())
+    if (!sender->IsAIHero())
         return;
 
-    g_Common->ChatPrint(std::to_string(static_cast<int>(args->Buff.Type)).c_str());
-    g_Common->ChatPrint(args->Buff.Name.c_str());
+    if (StringEquals(args->Buff.Name.c_str(), EzrealWBuff, true))
+        WTargets[sender->NetworkId()] = args->Buff;
 }
 
 PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk) 
@@ -1247,7 +1279,7 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
     Spells::Q->SetSkillshot(.25f, 60.f, 2000.f, kCollidesWithYasuoWall | kCollidesWithHeroes | kCollidesWithMinions, eSkillshotType::kSkillshotLine);
 
     Spells::Q2 = g_Common->AddSpell(SpellSlot::Q, 1150.f);
-    Spells::Q2->SetSkillshot(.2f, 60.f, 2250.f, kCollidesWithYasuoWall | kCollidesWithMinions, eSkillshotType::kSkillshotLine);
+    Spells::Q2->SetSkillshot(.2f, 65.f, 2500.f, kCollidesWithYasuoWall | kCollidesWithMinions, eSkillshotType::kSkillshotLine);
 
     Spells::W = g_Common->AddSpell(SpellSlot::W, 1150.f);
     Spells::W->SetSkillshot(.25f, 60.f, 1650.f, kCollidesWithYasuoWall, eSkillshotType::kSkillshotLine);
@@ -1269,7 +1301,7 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
     QDamageInput->IsOnHitDamage = true;
     QDamageInput->IsTargetedAbility = false;
 
-    for(auto const& e : g_ObjectManager->GetChampions(false))
+    for (auto const& e : g_ObjectManager->GetChampions(false))
         if (e->ChampionId() == ChampionId::Singed)
         {
             EnemyHasSinged = true;
@@ -1293,17 +1325,23 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
     const auto ComboMenu = MenuInstance->AddSubMenu("Combo", "combo");
     Combo::Q = ComboMenu->AddCheckBox("Use Q", "q", true);
     Combo::W = ComboMenu->AddCheckBox("Use W", "w", true);
-    Combo::E = ComboMenu->AddCheckBox("Use E", "e", true);
-    Combo::EQ = ComboMenu->AddCheckBox("Try E > Q Finisher", "eq", true);
-    Combo::EAA = ComboMenu->AddCheckBox("Try E > AA Finisher", "eaa", true);
-    Combo::EW = ComboMenu->AddCheckBox("Try E Proc W Finisher", "ew", true);
-    Combo::RCombo = ComboMenu->AddCheckBox("R Combo With Allies (2+ Hits)", "RCombo", true);
-    Combo::RExecute = ComboMenu->AddCheckBox("Use R Execute", "rexecute", true);
-    Combo::RAoE = ComboMenu->AddCheckBox("Use R AoE", "raoe", true);
-    Combo::RAoEHits = ComboMenu->AddSlider("AoE R Hits", "raoehits", 3, 2, 5);
-    Combo::RRange = ComboMenu->AddSlider("Custom R Range", "RRange", 1850, 0, 3000);
+
+    const auto eMenu = ComboMenu->AddSubMenu("E Settings", "esettings");
+    Combo::E = eMenu->AddCheckBox("Use E", "e", true);
+    Combo::EQ = eMenu->AddCheckBox("Try E > Q Finisher", "eq", true);
+    Combo::EAA = eMenu->AddCheckBox("Try E > AA Finisher", "eaa", true);
+    Combo::EW = eMenu->AddCheckBox("Try E Proc W Finisher", "ew", true);
+    Combo::ECombo = eMenu->AddCheckBox("Try E Full Combo Finisher", "ECombo", true);
+
+    const auto rMenu = ComboMenu->AddSubMenu("R Settings", "rsettings");
+    Combo::RCheckAllies = rMenu->AddCheckBox("Dont Ult If Allies Near Target", "RCheckAllies", true);
+    Combo::RCombo = rMenu->AddCheckBox("R Combo With Allies (2+ Hits)", "RCombo", true);
+    Combo::RExecute = rMenu->AddCheckBox("Use R Execute", "rexecute", true);
+    Combo::RAoE = rMenu->AddCheckBox("Use R AoE", "raoe", true);
+    Combo::RAoEHits = rMenu->AddSlider("AoE R Hits", "raoehits", 3, 2, 5);
+    Combo::RRange = rMenu->AddSlider("Custom R Range", "RRange", 1850, 0, 3000);
     Combo::RRange->SetTooltip("Has To Be Bigger Than R Distance");
-    Combo::RDistance = ComboMenu->AddSlider("R Distance From Enemies", "rdistance", 650, 0, 2500);
+    Combo::RDistance = rMenu->AddSlider("R Distance From Enemies", "rdistance", 650, 0, 2500);
     Combo::RDistance->SetTooltip("Has To Be Smaller Than R Range");
 
     const auto HarassMenu = MenuInstance->AddSubMenu("Harass", "harass");
@@ -1373,7 +1411,7 @@ PLUGIN_API bool OnLoadSDK(IPluginsSDK* plugin_sdk)
     EventHandler<Events::OnTeleport>::AddEventHandler(OnTeleport);
     EventHandler<Events::OnEndScene>::AddEventHandler(OnEndScene);
     EventHandler<Events::OnNewPath>::AddEventHandler(OnNewPath);
-    //EventHandler<Events::OnBuff>::AddEventHandler(OnBuff);
+    EventHandler<Events::OnBuff>::AddEventHandler(OnBuff);
 
     return true;
 }
@@ -1388,16 +1426,7 @@ PLUGIN_API void OnUnloadSDK()
     EventHandler<Events::OnTeleport>::RemoveEventHandler(OnTeleport);
     EventHandler<Events::OnEndScene>::RemoveEventHandler(OnEndScene);
     EventHandler<Events::OnNewPath>::RemoveEventHandler(OnNewPath);
-    //EventHandler<Events::OnBuff>::RemoveEventHandler(OnBuff);
-
-    /*if (!DamageCache.empty())
-    {
-        for (auto& x : DamageCache)
-            delete x;
-
-        DamageCache.clear();
-        DamageCache.shrink_to_fit();
-    }*/
+    EventHandler<Events::OnBuff>::RemoveEventHandler(OnBuff);
 
     if (!TurretLastTarget.empty())
     {

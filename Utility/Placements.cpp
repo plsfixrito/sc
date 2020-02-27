@@ -73,8 +73,8 @@ namespace Placements
 
 		for (auto const& track : Tracked)
 		{
-			if (!track.IsWard)
-				return;
+			if (!track.IsWard || track.Removed || track.Points.empty())
+				continue;
 
 			if ((enemy && track.IsEnemy) || (!enemy && !track.IsEnemy))
 			{
@@ -168,7 +168,22 @@ namespace Placements
 
 		if (info.Type == PlacementType::Unknown)
 			return;
-		
+
+		Tracked.erase(std::remove_if(Tracked.begin(), Tracked.end(), [](Placement x)
+			{
+				if (x.Ended())
+				{
+					x.Removed = true;
+					x.Points.clear();
+					x.Points.shrink_to_fit();
+					if (x.IsWard)
+						UpdateWardsClip(x.IsEnemy);
+					return true;
+				}
+
+				return false;
+			}), Tracked.end());
+
 		auto to = Placement();
 
 		to.Info = info;
@@ -209,6 +224,7 @@ namespace Placements
 			{
 				if (sender->NetworkId() == x.Object->NetworkId() || x.Ended())
 				{
+					x.Removed = true;
 					x.Points.clear();
 					x.Points.shrink_to_fit();
 					if (x.IsWard)
